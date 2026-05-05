@@ -32,15 +32,17 @@ pub fn run_hook(label: &str, raw: &RawCommand) -> Result<()> {
     Ok(())
 }
 
+#[mutants::skip] // thin I/O wrapper — requires a real envy.yml on disk
 pub fn run(name: &str) -> Result<()> {
-    let mut config = EnvyConfig::load_default()?;
+    let config = EnvyConfig::load_default()?;
 
     // `envy <cmd>` has no --profile flag; fall back to ENVY_PROFILE env var.
     let profile = std::env::var("ENVY_PROFILE").unwrap_or_else(|_| DEFAULT_PROFILE.to_string());
 
     let raw = config
         .commands
-        .remove(name)
+        .get(name)
+        .cloned()
         .filter(|cmd| cmd.is_active_for(&profile));
 
     let cmd = match raw {

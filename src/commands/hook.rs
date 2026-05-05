@@ -20,6 +20,10 @@ pub fn run(shell: &str) -> Result<()> {
 //   2. A completion function/block that provides tab-completion for all built-in
 //      subcommands and dynamically completes user-defined commands from envy.yml
 //      by calling `command envy _commands`.
+//
+// MAINTENANCE: All three snippets (ZSH, BASH, FISH) must be kept in sync.
+// When adding a new subcommand, update all three constants AND the test lists in
+// `all_builtin_subcommands_appear_in_*_snippet` below.
 
 const ZSH_SNIPPET: &str = r#"
 envy() {
@@ -37,9 +41,13 @@ _envy() {
   subcmds=(
     'up:Set up the development environment'
     'down:Stop all services'
+    'services:List services and their status'
+    'start:Start a named service'
+    'stop:Stop a named service'
+    'restart:Restart a named service'
     'status:Show install and environment status'
     'check:Validate the environment without making changes'
-    'init:Scaffold an envy.yml'
+    'init:Create an empty envy.yml'
     'hook:Print shell integration snippet'
   )
   local user_cmd
@@ -59,8 +67,13 @@ _envy() {
         '--dry-run[Check status without making changes]' \
         '--profile[Profile to activate]:profile'
       ;;
-    down|status|check)
+    down|status|check|services)
       _arguments '--profile[Profile to use]:profile'
+      ;;
+    start|stop|restart)
+      _arguments \
+        '1:service name' \
+        '--profile[Profile to use]:profile'
       ;;
     init)
       _arguments '--force[Overwrite an existing envy.yml]'
@@ -87,7 +100,7 @@ envy() {
 
 _envy_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
-  local subcmds="up down status check init hook"
+  local subcmds="up down services start stop restart status check init hook"
   local user_cmds
   user_cmds=$(command envy _commands 2>/dev/null)
   [ -n "$user_cmds" ] && subcmds="$subcmds $user_cmds"
@@ -101,7 +114,10 @@ _envy_completions() {
     up)
       COMPREPLY=($(compgen -W "--update --dry-run --profile" -- "$cur"))
       ;;
-    down|status|check)
+    down|status|check|services)
+      COMPREPLY=($(compgen -W "--profile" -- "$cur"))
+      ;;
+    start|stop|restart)
       COMPREPLY=($(compgen -W "--profile" -- "$cur"))
       ;;
     init)
@@ -132,21 +148,25 @@ function __envy_user_commands
 end
 
 function __envy_no_subcommand
-  not __fish_seen_subcommand_from up down status check init hook
+  not __fish_seen_subcommand_from up down services start stop restart status check init hook
 end
 
 complete -c envy -f
-complete -c envy -n __envy_no_subcommand -a up     -d "Set up the development environment"
-complete -c envy -n __envy_no_subcommand -a down   -d "Stop all services"
-complete -c envy -n __envy_no_subcommand -a status -d "Show install and environment status"
-complete -c envy -n __envy_no_subcommand -a check  -d "Validate the environment"
-complete -c envy -n __envy_no_subcommand -a init   -d "Scaffold an envy.yml"
-complete -c envy -n __envy_no_subcommand -a hook   -d "Print shell integration snippet"
+complete -c envy -n __envy_no_subcommand -a up       -d "Set up the development environment"
+complete -c envy -n __envy_no_subcommand -a down     -d "Stop all services"
+complete -c envy -n __envy_no_subcommand -a services -d "List services and their status"
+complete -c envy -n __envy_no_subcommand -a start    -d "Start a named service"
+complete -c envy -n __envy_no_subcommand -a stop     -d "Stop a named service"
+complete -c envy -n __envy_no_subcommand -a restart  -d "Restart a named service"
+complete -c envy -n __envy_no_subcommand -a status   -d "Show install and environment status"
+complete -c envy -n __envy_no_subcommand -a check    -d "Validate the environment"
+complete -c envy -n __envy_no_subcommand -a init     -d "Scaffold an envy.yml"
+complete -c envy -n __envy_no_subcommand -a hook     -d "Print shell integration snippet"
 complete -c envy -n __envy_no_subcommand -a "(__envy_user_commands)" -d "User-defined command"
 complete -c envy -n "__fish_seen_subcommand_from hook" -a "zsh bash fish"
 complete -c envy -n "__fish_seen_subcommand_from up" -l update  -d "Re-resolve all versions"
 complete -c envy -n "__fish_seen_subcommand_from up" -l dry-run -d "Check without making changes"
-complete -c envy -n "__fish_seen_subcommand_from up down status check" -l profile -d "Profile to use"
+complete -c envy -n "__fish_seen_subcommand_from up down services start stop restart status check" -l profile -d "Profile to use"
 complete -c envy -n "__fish_seen_subcommand_from init" -l force -d "Overwrite existing envy.yml"
 "#;
 
@@ -214,21 +234,21 @@ mod tests {
 
     #[test]
     fn all_builtin_subcommands_appear_in_zsh_snippet() {
-        for cmd in &["up", "down", "status", "check", "init", "hook"] {
+        for cmd in &["up", "down", "services", "start", "stop", "restart", "status", "check", "init", "hook"] {
             assert!(ZSH_SNIPPET.contains(cmd), "zsh snippet missing '{}'", cmd);
         }
     }
 
     #[test]
     fn all_builtin_subcommands_appear_in_bash_snippet() {
-        for cmd in &["up", "down", "status", "check", "init", "hook"] {
+        for cmd in &["up", "down", "services", "start", "stop", "restart", "status", "check", "init", "hook"] {
             assert!(BASH_SNIPPET.contains(cmd), "bash snippet missing '{}'", cmd);
         }
     }
 
     #[test]
     fn all_builtin_subcommands_appear_in_fish_snippet() {
-        for cmd in &["up", "down", "status", "check", "init", "hook"] {
+        for cmd in &["up", "down", "services", "start", "stop", "restart", "status", "check", "init", "hook"] {
             assert!(FISH_SNIPPET.contains(cmd), "fish snippet missing '{}'", cmd);
         }
     }

@@ -26,8 +26,10 @@ impl Shadowenv {
 
         let mut content = String::from("(provide \"envy\" \"1.0.0\")\n\n");
         for (key, value) in vars {
-            let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
-            content.push_str(&format!("(env/set \"{}\" \"{}\")\n", key, escaped));
+            // Both key and value are escaped: unescaped quotes or backslashes would
+            // corrupt the Lisp expression; an unescaped key could inject directives.
+            let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+            content.push_str(&format!("(env/set \"{}\" \"{}\")\n", esc(key), esc(value)));
         }
 
         fs::write(shadowenv_dir.join("500_envy.lisp"), content)
@@ -60,10 +62,8 @@ pub fn read_vars(path: &Path) -> Option<HashMap<String, String>> {
             && let Some((key, rest)) = rest.split_once("\" \"")
             && let Some(value) = rest.strip_suffix("\")")
         {
-            vars.insert(
-                key.to_string(),
-                value.replace("\\\"", "\"").replace("\\\\", "\\"),
-            );
+            let unescape = |s: &str| s.replace("\\\"", "\"").replace("\\\\", "\\");
+            vars.insert(unescape(key), unescape(value));
         }
     }
     Some(vars)
@@ -186,7 +186,7 @@ mod tests {
     }
 
     #[test]
-    fn write_env_file_escapes_special_chars() {
+    fn write_env_file_escapes_special_chars_in_value() {
         let dir = tmp_dir();
         let shadowenv = Shadowenv::new();
         let mut vars = HashMap::new();
@@ -195,13 +195,28 @@ mod tests {
         shadowenv.write_env_file(&dir, &vars).unwrap();
 
         let file = dir.join(".shadowenv.d").join("500_envy.lisp");
-        let content = std::fs::read_to_string(&file).unwrap();
-        // Verify the written content can be round-tripped by read_vars.
         let parsed = read_vars(&file).unwrap();
         assert_eq!(parsed["K"], "back\\slash and \"quote\"");
 
         let _ = std::fs::remove_dir_all(&dir);
-        let _ = content;
+    }
+
+    #[test]
+    fn write_env_file_escapes_special_chars_in_key() {
+        let dir = tmp_dir();
+        let shadowenv = Shadowenv::new();
+        let mut vars = HashMap::new();
+        // A key with a quote would be a Lisp injection if not escaped.
+        vars.insert("KEY_WITH_\"QUOTE\"".into(), "value".into());
+
+        shadowenv.write_env_file(&dir, &vars).unwrap();
+
+        let file = dir.join(".shadowenv.d").join("500_envy.lisp");
+        let parsed = read_vars(&file).unwrap();
+        // Should round-trip correctly rather than breaking the Lisp structure.
+        assert_eq!(parsed["KEY_WITH_\"QUOTE\""], "value");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // ── Shadowenv::name ───────────────────────────────────────────────────────
@@ -209,5 +224,69 @@ mod tests {
     #[test]
     fn shadowenv_name_is_shadowenv() {
         assert_eq!(Shadowenv::new().name(), "shadowenv");
+    }
+
+    // ── Shadowenv::is_available ───────────────────────────────────────────────
+
+    #[test]
+    fn shadowenv_is_available_consistent_with_which() {
+        let expected = which("shadowenv").is_ok();
+        assert_eq!(Shadowenv::new().is_available(), expected);
+    }
+
+    #[test]
+    fn shadowenv_is_available_true_when_installed() {
+        if which("shadowenv").is_err() { return; }
+        assert!(Shadowenv::new().is_available(), "must be true when shadowenv is on PATH");
+    }
+
+    #[test]
+    fn shadowenv_is_available_false_when_not_installed() {
+        if which("shadowenv").is_ok() { return; }
+        assert!(!Shadowenv::new().is_available(), "must be false when shadowenv is absent");
+    }
+
+    // ── Shadowenv::trust / setup ───────────────────────────────────────────────
+
+    #[test]
+    fn shadowenv_setup_writes_env_file() {
+        let dir = tmp_dir();
+        let shadowenv = Shadowenv::new();
+        let mut vars = HashMap::new();
+        vars.insert("SETUP_KEY".into(), "setup_val".into());
+        shadowenv.write_env_file(&dir, &vars).unwrap();
+        let file = dir.join(".shadowenv.d").join("500_envy.lisp");
+        assert!(file.exists(), "setup must create the lisp file");
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert!(content.contains("SETUP_KEY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn shadowenv_setup_fails_when_shadowenv_not_installed() {
+        // When shadowenv binary is absent, trust() must fail, and setup() propagates that.
+        // This kills `replace setup -> Ok(())` and `replace trust -> Ok(())`.
+        if which("shadowenv").is_ok() { return; }
+        let dir = tmp_dir();
+        let shadowenv = Shadowenv::new();
+        let mut vars = HashMap::new();
+        vars.insert("KEY".into(), "val".into());
+        let result = shadowenv.setup(&dir, &vars);
+        assert!(result.is_err(), "setup must fail when shadowenv binary is absent");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn shadowenv_setup_succeeds_when_shadowenv_installed() {
+        // When shadowenv IS installed, setup() must succeed (trust runs without bail).
+        // This kills `delete ! in trust` — mutation bails on success, making this Err.
+        if which("shadowenv").is_err() { return; }
+        let dir = tmp_dir();
+        let shadowenv = Shadowenv::new();
+        let mut vars = HashMap::new();
+        vars.insert("KEY".into(), "val".into());
+        let result = shadowenv.setup(&dir, &vars);
+        assert!(result.is_ok(), "setup must succeed when shadowenv is installed");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

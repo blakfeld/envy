@@ -3,17 +3,17 @@ use anyhow::Result;
 use crate::config::Dependency;
 use crate::package_manager::PackageManager;
 
-use super::{Module, extra_strs, run_cmd};
+use super::{Module, extra_strs, node_pkg, pm_dep, run_cmd};
 
 pub struct NodeModule;
 
 impl Module for NodeModule {
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
-        pm.is_package_installed(dep)
+        pm.is_package_installed(&pm_dep(dep, node_pkg(pm)))
     }
 
     fn install(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<()> {
-        pm.install_package(dep)?;
+        pm.install_package(&pm_dep(dep, node_pkg(pm)))?;
 
         let packages = extra_strs(dep, "global_packages");
         if !packages.is_empty() {
@@ -30,40 +30,7 @@ impl Module for NodeModule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::Result;
-
-    struct MockPm {
-        installed: bool,
-    }
-    impl crate::package_manager::PackageManager for MockPm {
-        fn name(&self) -> &str {
-            "mock"
-        }
-        fn is_available(&self) -> bool {
-            true
-        }
-        fn bootstrap(&self) -> Result<()> {
-            Ok(())
-        }
-        fn is_package_installed(&self, _: &Dependency) -> Result<bool> {
-            Ok(self.installed)
-        }
-        fn install_package(&self, _: &Dependency) -> Result<()> {
-            Ok(())
-        }
-        fn is_service_running(&self, _: &str) -> Result<bool> {
-            Ok(false)
-        }
-        fn start_service(&self, _: &str) -> Result<()> {
-            Ok(())
-        }
-        fn stop_service(&self, _: &str) -> Result<()> {
-            Ok(())
-        }
-        fn resolved_version(&self, _: &Dependency) -> Result<Option<String>> {
-            Ok(None)
-        }
-    }
+    use crate::package_manager::MockPackageManager;
 
     #[test]
     fn node_module_is_not_a_service() {
@@ -72,21 +39,24 @@ mod tests {
 
     #[test]
     fn node_is_installed_delegates_to_pm() {
-        let pm = MockPm { installed: true };
+        let pm = MockPackageManager { installed: true, ..Default::default() };
         let dep = Dependency::simple("node");
         assert!(NodeModule.is_installed(&pm, &dep).unwrap());
 
-        let pm2 = MockPm { installed: false };
+        let pm2 = MockPackageManager::default();
         assert!(!NodeModule.is_installed(&pm2, &dep).unwrap());
     }
 
     #[test]
     fn node_install_without_global_packages_does_not_run_npm() {
-        // install_package succeeds; no global_packages key means no npm call.
-        let pm = MockPm { installed: false };
+        let pm = MockPackageManager::default();
         let dep = Dependency::simple("node");
-        // This would run `npm install -g` if packages were present; with an empty
-        // list it returns Ok without spawning npm.
         assert!(NodeModule.install(&pm, &dep).is_ok());
+    }
+
+    #[test]
+    fn node_install_propagates_pm_error() {
+        let pm = MockPackageManager { install_fails: true, ..Default::default() };
+        assert!(NodeModule.install(&pm, &Dependency::simple("node")).is_err());
     }
 }

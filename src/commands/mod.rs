@@ -4,6 +4,7 @@ pub mod exec;
 pub mod hook;
 pub mod init;
 pub mod list_commands;
+pub mod service;
 pub mod shared;
 pub mod status;
 pub mod up;

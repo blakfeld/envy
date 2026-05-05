@@ -1,14 +1,12 @@
 use anyhow::Result;
-use colored::Colorize;
-use std::path::Path;
 
 use crate::config::EnvyConfig;
-use crate::env_manager::shadowenv;
 use crate::output;
 use crate::package_manager;
 
 use super::shared;
 
+#[mutants::skip] // thin I/O wrapper — requires a real envy.yml and package manager
 pub fn run(profile: &str) -> Result<()> {
     let config = EnvyConfig::load_default()?;
 
@@ -25,28 +23,7 @@ pub fn run(profile: &str) -> Result<()> {
 
     if !config.environment.is_empty() {
         output::header("Environment");
-
-        let written = shadowenv::read_vars(Path::new(shadowenv::ENV_FILE));
-        let key_col = config
-            .environment
-            .keys()
-            .map(|k| k.len())
-            .max()
-            .unwrap_or(0);
-
-        match written {
-            None => output::info("not configured — run envy up first"),
-            Some(vars) => {
-                for key in config.environment.keys() {
-                    let value = vars
-                        .get(key)
-                        .map(String::as_str)
-                        .unwrap_or("(not set)")
-                        .dimmed();
-                    println!("  {:<key_col$}  {}", key, value);
-                }
-            }
-        }
+        shared::print_env_table(&config.environment, false)?;
     }
 
     println!();

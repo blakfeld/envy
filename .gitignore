@@ -1,1 +1,8 @@
+/.shadowenv.d/
 /target
+mutants.out.old/
+mutants.out/
+mutants.txt
+review.md
+todo.md
+

@@ -1,19 +1,27 @@
 # envy
 
-A declarative developer environment manager for macOS. Define your project's dependencies, services, environment variables, and runnable commands in a single `envy.yml` file — then run `envy up` to get everything running.
+A declarative developer environment manager. Define your project's dependencies, services, environment variables, and runnable commands in a single `envy.yml` file — then run `envy up` to get everything running.
 
 ## What it does
 
-- **Installs dependencies** via Homebrew (languages, databases, CLIs, etc.)
+- **Installs dependencies** via the platform package manager (languages, databases, CLIs, etc.)
 - **Starts services** like MySQL and Redis, and waits for them to be healthy
 - **Sets environment variables** persistently in your shell session via [shadowenv](https://shopify.github.io/shadowenv/)
 - **Decrypts secrets** from [ejson](https://github.com/Shopify/ejson) files and merges them into the environment
 - **Locks versions** in `envy.lock` so teammates get the same setup
 - **Runs project commands** defined in `envy.yml` (like `npm run dev`, `make test`, etc.)
 
+## Platform support
+
+| Platform | Package manager | Service management |
+|---|---|---|
+| macOS | [Homebrew](https://brew.sh) (auto-installed if missing) | `brew services` |
+| Ubuntu / Debian | apt (`sudo apt-get`) | `systemctl` |
+| Windows 10/11 | [WinGet](https://learn.microsoft.com/en-us/windows/package-manager/winget/) | `net start` / `sc` |
+
 ## Requirements
 
-- macOS (uses Homebrew as the package manager)
+- A supported platform (see above)
 - Rust toolchain to build from source
 
 ## Installation
@@ -37,15 +45,13 @@ envy hook fish | source
 
 ## Quick start
 
-Scaffold a config from your existing project files:
+Create a starter config:
 
 ```sh
 envy init
 ```
 
-This detects languages and tools (Rust, Node, Go, Ruby, Python, Java) from project markers like `Cargo.toml`, `package.json`, `go.mod`, etc. and writes a starter `envy.yml`.
-
-Then bring the environment up:
+Then edit `envy.yml` to add your dependencies, and bring the environment up:
 
 ```sh
 envy up
@@ -168,7 +174,7 @@ envy check
 
 ### `envy init`
 
-Scaffolds an `envy.yml` by detecting your project's languages from files like `Cargo.toml`, `package.json`, `go.mod`, `Gemfile`, etc.
+Creates an empty `envy.yml` in the current directory.
 
 ```sh
 envy init          # Fails if envy.yml already exists
@@ -253,15 +259,54 @@ Commit `envy.lock` to version control. Run `envy up --update` when you want to u
 
 ## Supported dependency modules
 
+### Services
+
+| Name(s) | Default port | Notes |
+|---|---|---|
+| `mysql` | 3306 | Managed service; supports `port`, `cli_args`; writes `my.cnf` where supported |
+| `postgresql`, `postgres` | 5432 | Managed service; supports `port` |
+| `redis` | 6379 | Managed service; health-checks via PING |
+| `mongodb`, `mongo` | 27017 | Managed service; on Homebrew requires `tap: mongodb/brew` |
+| `nginx` | 80 | Managed service; supports `port` |
+
+### Languages and runtimes
+
 | Name(s) | Notes |
 |---|---|
-| `mysql` | Manages the Homebrew service; writes `my.cnf` for custom ports/flags |
-| `redis` | Manages the Homebrew service; health-checks via PING |
 | `node`, `nodejs`, `javascript`, `js` | Supports `global_packages` |
 | `typescript`, `ts` | Installs Node + TypeScript globally; supports `global_packages` |
 | `ruby` | Supports `gems` |
-| `rust`, `rustup` | Installs via rustup; supports `toolchain`, `targets`, `components` |
-| `python`, `python3` | Installed as the `python` Homebrew formula |
-| `java`, `openjdk` | Installed as the `openjdk` Homebrew formula |
-| `go`, `golang` | Installed as the `go` Homebrew formula |
-| anything else | Falls back to a generic Homebrew install |
+| `rust`, `rustup` | Installs via rustup (all platforms); supports `toolchain`, `targets`, `components` |
+| `python`, `python3` | |
+| `go`, `golang` | |
+| `java`, `openjdk` | |
+| `kotlin` | |
+| `scala` | |
+| `php` | |
+| `elixir` | |
+| `swift` | |
+| anything else | Falls back to a generic package manager install |
+
+### Platform package name mapping
+
+Each module knows the correct package name for each platform — you always use the same name in `envy.yml` regardless of OS:
+
+| Module | Homebrew | apt | WinGet |
+|---|---|---|---|
+| `mysql` | `mysql` | `mysql-server` | `Oracle.MySQL` |
+| `postgresql` | `postgresql` | `postgresql` | `PostgreSQL.PostgreSQL` |
+| `redis` | `redis` | `redis-server` | `Redis.Redis` |
+| `mongodb` | `mongodb-community` | `mongodb-org` | `MongoDB.Server` |
+| `nginx` | `nginx` | `nginx` | `Nginx.Nginx` |
+| `node` | `node` | `nodejs` | `OpenJS.NodeJS` |
+| `python` | `python` | `python3` | `Python.Python.3` |
+| `go` | `go` | `golang-go` | `GoLang.Go` |
+| `java` | `openjdk` | `default-jdk` | `Microsoft.OpenJDK.21` |
+| `kotlin` | `kotlin` | `kotlin` | `JetBrains.Kotlin` |
+| `ruby` | `ruby` | `ruby` | `RubyInstallerTeam.Ruby.3` |
+
+### Platform notes
+
+**Ubuntu/Debian:** Install operations use `sudo apt-get`. Version pinning with the `version:` field uses apt's exact-version syntax (`pkg=version`) — for most languages, omit the version field and rely on `envy.lock` to pin the installed version across machines.
+
+**Windows:** Service management uses `net start`/`sc`. Custom MySQL/PostgreSQL config options (`port`, `cli_args`) are not applied on Windows.

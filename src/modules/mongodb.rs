@@ -1,0 +1,156 @@
+use anyhow::{Context, Result};
+use std::net::{SocketAddr, TcpStream};
+use std::time::Duration;
+
+use crate::config::Dependency;
+use crate::package_manager::PackageManager;
+
+use super::{Module, pm_dep};
+
+pub struct MongodbModule;
+
+// brew requires the mongodb/brew tap; users should add `tap: mongodb/brew` in envy.yml.
+fn package_name(pm: &dyn PackageManager) -> &'static str {
+    match pm.name() {
+        "apt" => "mongodb-org",
+        "winget" => "MongoDB.Server",
+        _ => "mongodb-community",
+    }
+}
+
+fn port(dep: &Dependency) -> u16 {
+    dep.extra
+        .get("port")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(27017) as u16
+}
+
+impl Module for MongodbModule {
+    fn is_service(&self) -> bool {
+        true
+    }
+
+    fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
+        pm.is_package_installed(&pm_dep(dep, package_name(pm)))
+    }
+
+    fn install(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<()> {
+        pm.install_package(&pm_dep(dep, package_name(pm)))
+    }
+
+    fn is_running(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
+        pm.is_service_running(&self.service_name(dep))
+    }
+
+    fn start(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<()> {
+        pm.start_service(&self.service_name(dep))
+    }
+
+    fn stop(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<()> {
+        pm.stop_service(&self.service_name(dep))
+    }
+
+    fn health_check(&self, dep: &Dependency) -> Result<()> {
+        let p = port(dep);
+        let addr: SocketAddr = format!("127.0.0.1:{p}").parse()?;
+        TcpStream::connect_timeout(&addr, Duration::from_secs(1))
+            .with_context(|| format!("MongoDB not accepting connections on port {p}"))?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mongodb_module_is_service() {
+        assert!(MongodbModule.is_service());
+    }
+
+    #[test]
+    fn port_defaults_to_27017() {
+        let dep = Dependency::simple("mongodb");
+        assert_eq!(port(&dep), 27017);
+    }
+
+    #[test]
+    fn mongodb_health_check_fails_on_unused_port() {
+        let mut extra = std::collections::HashMap::new();
+        extra.insert("port".into(), serde_yaml::Value::Number(19996u64.into()));
+        let dep = Dependency::with_extra("mongodb", extra);
+        assert!(MongodbModule.health_check(&dep).is_err());
+    }
+
+    #[test]
+    fn package_name_apt() {
+        let pm = crate::package_manager::MockPackageManager { name: "apt", ..Default::default() };
+        assert_eq!(package_name(&pm), "mongodb-org");
+    }
+
+    #[test]
+    fn package_name_winget() {
+        let pm = crate::package_manager::MockPackageManager { name: "winget", ..Default::default() };
+        assert_eq!(package_name(&pm), "MongoDB.Server");
+    }
+
+    #[test]
+    fn package_name_brew_default() {
+        let pm = crate::package_manager::MockPackageManager { name: "brew", ..Default::default() };
+        assert_eq!(package_name(&pm), "mongodb-community");
+    }
+
+    #[test]
+    fn is_installed_true() {
+        let pm = crate::package_manager::MockPackageManager { installed: true, ..Default::default() };
+        assert!(MongodbModule.is_installed(&pm, &Dependency::simple("mongodb")).unwrap());
+    }
+
+    #[test]
+    fn is_installed_false() {
+        let pm = crate::package_manager::MockPackageManager::default();
+        assert!(!MongodbModule.is_installed(&pm, &Dependency::simple("mongodb")).unwrap());
+    }
+
+    #[test]
+    fn install_propagates_pm_error() {
+        let pm = crate::package_manager::MockPackageManager { install_fails: true, ..Default::default() };
+        assert!(MongodbModule.install(&pm, &Dependency::simple("mongodb")).is_err());
+    }
+
+    #[test]
+    fn is_running_true() {
+        let pm = crate::package_manager::MockPackageManager { service_running: true, ..Default::default() };
+        assert!(MongodbModule.is_running(&pm, &Dependency::simple("mongodb")).unwrap());
+    }
+
+    #[test]
+    fn is_running_false() {
+        let pm = crate::package_manager::MockPackageManager::default();
+        assert!(!MongodbModule.is_running(&pm, &Dependency::simple("mongodb")).unwrap());
+    }
+
+    #[test]
+    fn start_delegates_to_pm() {
+        let pm = crate::package_manager::MockPackageManager::default();
+        assert!(MongodbModule.start(&pm, &Dependency::simple("mongodb")).is_ok());
+    }
+
+    #[test]
+    fn start_propagates_pm_error() {
+        let pm = crate::package_manager::MockPackageManager { start_service_fails: true, ..Default::default() };
+        assert!(MongodbModule.start(&pm, &Dependency::simple("mongodb")).is_err());
+    }
+
+    #[test]
+    fn stop_delegates_to_pm() {
+        let pm = crate::package_manager::MockPackageManager::default();
+        assert!(MongodbModule.stop(&pm, &Dependency::simple("mongodb")).is_ok());
+    }
+
+    #[test]
+    fn stop_propagates_pm_error() {
+        let pm = crate::package_manager::MockPackageManager { stop_service_fails: true, ..Default::default() };
+        assert!(MongodbModule.stop(&pm, &Dependency::simple("mongodb")).is_err());
+    }
+}
