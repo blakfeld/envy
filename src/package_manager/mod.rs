@@ -1,4 +1,6 @@
+#[cfg(any(test, target_os = "macos"))]
 mod brew;
+#[cfg(target_os = "macos")]
 pub use brew::Homebrew;
 
 #[cfg(any(test, target_os = "linux"))]
