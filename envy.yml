@@ -1,0 +1,16 @@
+name: envy
+
+dependencies:
+  - rust:
+      toolchain: stable
+
+environment: {}
+
+commands:
+  build: cargo build
+  test: cargo test
+  lint: cargo clippy
+  fmt: cargo fmt
+  fmt-check:
+    cmd: cargo fmt --check
+    profiles: [ci]
