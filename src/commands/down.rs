@@ -30,11 +30,7 @@ pub fn run(profile: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn down_impl(
-    config: &EnvyConfig,
-    pm: &dyn PackageManager,
-    profile: &str,
-) -> Result<()> {
+pub(crate) fn down_impl(config: &EnvyConfig, pm: &dyn PackageManager, profile: &str) -> Result<()> {
     let deps = config.normalized_dependencies(profile);
     let services: Vec<_> = deps
         .iter()
@@ -83,7 +79,8 @@ mod tests {
     fn make_config(dep_names: &[&str]) -> EnvyConfig {
         EnvyConfig {
             name: Some("test".into()),
-            dependencies: dep_names.iter()
+            dependencies: dep_names
+                .iter()
                 .map(|n| RawDependency::Simple(n.to_string()))
                 .collect(),
             environment: HashMap::new(),
@@ -97,7 +94,10 @@ mod tests {
     fn down_impl_stops_running_service() {
         // Kills `delete ! in run` — mutation would skip stop when service IS running.
         let config = make_config(&["mysql"]);
-        let pm = MockPackageManager { service_running: true, ..Default::default() };
+        let pm = MockPackageManager {
+            service_running: true,
+            ..Default::default()
+        };
         down_impl(&config, &pm, "dev").unwrap();
         assert!(
             !pm.stopped_services.borrow().is_empty(),
@@ -123,7 +123,10 @@ mod tests {
     #[test]
     fn down_impl_skips_service_already_stopped() {
         let config = make_config(&["mysql"]);
-        let pm = MockPackageManager { service_running: false, ..Default::default() };
+        let pm = MockPackageManager {
+            service_running: false,
+            ..Default::default()
+        };
         down_impl(&config, &pm, "dev").unwrap();
         assert!(pm.stopped_services.borrow().is_empty());
     }

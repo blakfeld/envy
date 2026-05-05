@@ -29,7 +29,10 @@ mod tests {
 
     #[test]
     fn generic_is_installed_delegates_to_pm_true() {
-        let pm = MockPackageManager { installed: true, ..Default::default() };
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
         let dep = Dependency::simple("jq");
         assert!(GenericModule.is_installed(&pm, &dep).unwrap());
     }
@@ -50,7 +53,10 @@ mod tests {
 
     #[test]
     fn generic_install_propagates_pm_error() {
-        let pm = MockPackageManager { install_fails: true, ..Default::default() };
+        let pm = MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
         let dep = Dependency::simple("jq");
         assert!(GenericModule.install(&pm, &dep).is_err());
     }

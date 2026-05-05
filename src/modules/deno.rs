@@ -65,7 +65,11 @@ impl Module for DenoModule {
         Ok(())
     }
 
-    fn resolved_version(&self, _pm: &dyn PackageManager, _dep: &Dependency) -> Result<Option<String>> {
+    fn resolved_version(
+        &self,
+        _pm: &dyn PackageManager,
+        _dep: &Dependency,
+    ) -> Result<Option<String>> {
         let path = deno_bin()
             .filter(|b| std::path::Path::new(b).exists())
             .unwrap_or_else(|| "deno".to_string());
@@ -100,9 +104,15 @@ mod tests {
 
     #[test]
     fn deno_bin_returns_some_with_non_empty_home() {
-        if std::env::var("HOME").map(|h| !h.is_empty()).unwrap_or(false) {
+        if std::env::var("HOME")
+            .map(|h| !h.is_empty())
+            .unwrap_or(false)
+        {
             let bin = deno_bin().unwrap();
-            assert!(bin.contains(".deno/bin/deno"), "Expected ~/.deno/bin/deno, got {bin}");
+            assert!(
+                bin.contains(".deno/bin/deno"),
+                "Expected ~/.deno/bin/deno, got {bin}"
+            );
         }
     }
 
@@ -126,17 +136,24 @@ mod tests {
     #[test]
     fn deno_is_installed_true_when_bin_file_exists_and_not_on_path() {
         // Only runs when deno is NOT on PATH.
-        if which("deno").is_ok() { return; }
+        if which("deno").is_ok() {
+            return;
+        }
         if let Some(bin_path) = deno_bin() {
             let path = std::path::Path::new(&bin_path);
-            if path.exists() { return; }
+            if path.exists() {
+                return;
+            }
             std::fs::create_dir_all(path.parent().unwrap()).ok();
             std::fs::write(&bin_path, b"#!/bin/sh").ok();
             let pm = MockPackageManager::default();
             let dep = Dependency::simple("deno");
             let result = DenoModule.is_installed(&pm, &dep).unwrap();
             std::fs::remove_file(&bin_path).ok();
-            assert!(result, "Expected is_installed=true when deno binary exists at {bin_path}");
+            assert!(
+                result,
+                "Expected is_installed=true when deno binary exists at {bin_path}"
+            );
         }
     }
 
@@ -149,19 +166,28 @@ mod tests {
 
     #[test]
     fn deno_resolved_version_is_non_empty_when_installed() {
-        if which("deno").is_err() { return; }
+        if which("deno").is_err() {
+            return;
+        }
         let pm = MockPackageManager::default();
         let dep = Dependency::simple("deno");
         let ver = DenoModule.resolved_version(&pm, &dep).unwrap();
         assert!(ver.is_some(), "Expected Some version when deno is on PATH");
-        assert!(!ver.unwrap().is_empty(), "Expected non-empty version string");
+        assert!(
+            !ver.unwrap().is_empty(),
+            "Expected non-empty version string"
+        );
     }
 
     #[test]
     fn deno_is_installed_false_when_not_on_path_and_no_bin_file() {
-        if which("deno").is_ok() { return; }
+        if which("deno").is_ok() {
+            return;
+        }
         if let Some(p) = deno_bin() {
-            if std::path::Path::new(&p).exists() { return; }
+            if std::path::Path::new(&p).exists() {
+                return;
+            }
         }
         let pm = MockPackageManager::default();
         let dep = Dependency::simple("deno");
@@ -173,32 +199,48 @@ mod tests {
 
     #[test]
     fn deno_resolved_version_is_none_when_not_installed() {
-        if which("deno").is_ok() { return; }
+        if which("deno").is_ok() {
+            return;
+        }
         if let Some(p) = deno_bin() {
-            if std::path::Path::new(&p).exists() { return; }
+            if std::path::Path::new(&p).exists() {
+                return;
+            }
         }
         let pm = MockPackageManager::default();
         let dep = Dependency::simple("deno");
         let ver = DenoModule.resolved_version(&pm, &dep).unwrap();
-        assert!(ver.is_none(), "Expected None version when deno is not installed");
+        assert!(
+            ver.is_none(),
+            "Expected None version when deno is not installed"
+        );
     }
 
     #[test]
     fn deno_install_fails_when_script_exits_nonzero() {
         // Uses ENVY_TEST_DENO_INSTALL_SCRIPT to inject a failing script.
-        unsafe { std::env::set_var("ENVY_TEST_DENO_INSTALL_SCRIPT", "exit 1"); }
+        unsafe {
+            std::env::set_var("ENVY_TEST_DENO_INSTALL_SCRIPT", "exit 1");
+        }
         let pm = MockPackageManager::default();
         let dep = Dependency::simple("deno");
         let result = DenoModule.install(&pm, &dep);
-        unsafe { std::env::remove_var("ENVY_TEST_DENO_INSTALL_SCRIPT"); }
-        assert!(result.is_err(), "install must return Err when script exits non-zero");
+        unsafe {
+            std::env::remove_var("ENVY_TEST_DENO_INSTALL_SCRIPT");
+        }
+        assert!(
+            result.is_err(),
+            "install must return Err when script exits non-zero"
+        );
     }
 
     #[test]
     fn deno_resolved_version_contains_dot_when_installed() {
         if which("deno").is_err() {
             if let Some(p) = deno_bin() {
-                if !std::path::Path::new(&p).exists() { return; }
+                if !std::path::Path::new(&p).exists() {
+                    return;
+                }
             } else {
                 return;
             }

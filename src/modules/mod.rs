@@ -255,10 +255,17 @@ pub(super) fn write_mysql_config(
     if let Some(args) = cli_args {
         for arg in args.split_whitespace() {
             // Require the -- prefix so bare key=value tokens can't inject directives.
-            let Some(rest) = arg.strip_prefix("--") else { continue };
-            let Some((key, val)) = rest.split_once('=') else { continue };
+            let Some(rest) = arg.strip_prefix("--") else {
+                continue;
+            };
+            let Some((key, val)) = rest.split_once('=') else {
+                continue;
+            };
             // Keys must be safe ini identifiers: alphanumeric, hyphens, underscores.
-            if !key.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+            if !key
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+            {
                 continue;
             }
             // Values must not contain newlines or null bytes (would break ini structure).
@@ -518,8 +525,19 @@ mod tests {
     #[test]
     fn get_language_aliases_are_not_services() {
         for name in &[
-            "python", "python3", "java", "openjdk", "go", "golang", "ruby", "typescript", "ts",
-            "kotlin", "scala", "php", "elixir",
+            "python",
+            "python3",
+            "java",
+            "openjdk",
+            "go",
+            "golang",
+            "ruby",
+            "typescript",
+            "ts",
+            "kotlin",
+            "scala",
+            "php",
+            "elixir",
         ] {
             assert!(!get(name).is_service(), "{} should not be a service", name);
         }
@@ -892,8 +910,18 @@ mod tests {
 
     #[test]
     fn default_service_name_different_names() {
-        assert_eq!(DefaultModule.service_name(&Dependency::simple("redis")).as_ref(), "redis");
-        assert_eq!(DefaultModule.service_name(&Dependency::simple("mysql")).as_ref(), "mysql");
+        assert_eq!(
+            DefaultModule
+                .service_name(&Dependency::simple("redis"))
+                .as_ref(),
+            "redis"
+        );
+        assert_eq!(
+            DefaultModule
+                .service_name(&Dependency::simple("mysql"))
+                .as_ref(),
+            "mysql"
+        );
     }
 
     #[test]
@@ -992,8 +1020,20 @@ mod tests {
         fail_for: u32,
     }
     impl Module for EventuallyHealthyModule {
-        fn is_installed(&self, _: &dyn crate::package_manager::PackageManager, _: &Dependency) -> Result<bool> { Ok(true) }
-        fn install(&self, _: &dyn crate::package_manager::PackageManager, _: &Dependency) -> Result<()> { Ok(()) }
+        fn is_installed(
+            &self,
+            _: &dyn crate::package_manager::PackageManager,
+            _: &Dependency,
+        ) -> Result<bool> {
+            Ok(true)
+        }
+        fn install(
+            &self,
+            _: &dyn crate::package_manager::PackageManager,
+            _: &Dependency,
+        ) -> Result<()> {
+            Ok(())
+        }
         fn health_check(&self, _: &Dependency) -> Result<()> {
             let n = self.calls.get();
             self.calls.set(n + 1);
@@ -1007,7 +1047,10 @@ mod tests {
 
     #[test]
     fn wait_for_ready_retries_until_healthy() {
-        let m = EventuallyHealthyModule { calls: std::cell::Cell::new(0), fail_for: 2 };
+        let m = EventuallyHealthyModule {
+            calls: std::cell::Cell::new(0),
+            fail_for: 2,
+        };
         let dep = Dependency::simple("eventually");
         m.wait_for_ready(&dep).unwrap();
         assert!(m.calls.get() >= 3, "Expected at least 3 health_check calls");
@@ -1017,19 +1060,28 @@ mod tests {
 
     #[test]
     fn node_pkg_apt() {
-        let pm = crate::package_manager::MockPackageManager { name: "apt", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "apt",
+            ..Default::default()
+        };
         assert_eq!(node_pkg(&pm), "nodejs");
     }
 
     #[test]
     fn node_pkg_winget() {
-        let pm = crate::package_manager::MockPackageManager { name: "winget", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(node_pkg(&pm), "OpenJS.NodeJS");
     }
 
     #[test]
     fn node_pkg_brew_default() {
-        let pm = crate::package_manager::MockPackageManager { name: "brew", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(node_pkg(&pm), "node");
     }
 
@@ -1037,13 +1089,19 @@ mod tests {
 
     #[test]
     fn ruby_pkg_winget() {
-        let pm = crate::package_manager::MockPackageManager { name: "winget", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(ruby_pkg(&pm), "RubyInstallerTeam.Ruby.3");
     }
 
     #[test]
     fn ruby_pkg_brew_default() {
-        let pm = crate::package_manager::MockPackageManager { name: "brew", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(ruby_pkg(&pm), "ruby");
     }
 
@@ -1051,36 +1109,68 @@ mod tests {
 
     #[test]
     fn package_module_name_for_apt() {
-        let m = PackageModule { default: "go", apt: "golang-go", winget: "GoLang.Go" };
-        let pm = crate::package_manager::MockPackageManager { name: "apt", ..Default::default() };
+        let m = PackageModule {
+            default: "go",
+            apt: "golang-go",
+            winget: "GoLang.Go",
+        };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "apt",
+            ..Default::default()
+        };
         assert_eq!(m.name_for(&pm), "golang-go");
     }
 
     #[test]
     fn package_module_name_for_winget() {
-        let m = PackageModule { default: "go", apt: "golang-go", winget: "GoLang.Go" };
-        let pm = crate::package_manager::MockPackageManager { name: "winget", ..Default::default() };
+        let m = PackageModule {
+            default: "go",
+            apt: "golang-go",
+            winget: "GoLang.Go",
+        };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(m.name_for(&pm), "GoLang.Go");
     }
 
     #[test]
     fn package_module_name_for_default() {
-        let m = PackageModule { default: "go", apt: "golang-go", winget: "GoLang.Go" };
-        let pm = crate::package_manager::MockPackageManager { name: "brew", ..Default::default() };
+        let m = PackageModule {
+            default: "go",
+            apt: "golang-go",
+            winget: "GoLang.Go",
+        };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(m.name_for(&pm), "go");
     }
 
     #[test]
     fn package_module_is_installed_true() {
-        let m = PackageModule { default: "go", apt: "golang-go", winget: "GoLang.Go" };
-        let pm = crate::package_manager::MockPackageManager { installed: true, ..Default::default() };
+        let m = PackageModule {
+            default: "go",
+            apt: "golang-go",
+            winget: "GoLang.Go",
+        };
+        let pm = crate::package_manager::MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
         let dep = Dependency::simple("go");
         assert!(m.is_installed(&pm, &dep).unwrap());
     }
 
     #[test]
     fn package_module_is_installed_false() {
-        let m = PackageModule { default: "go", apt: "golang-go", winget: "GoLang.Go" };
+        let m = PackageModule {
+            default: "go",
+            apt: "golang-go",
+            winget: "GoLang.Go",
+        };
         let pm = crate::package_manager::MockPackageManager::default();
         let dep = Dependency::simple("go");
         assert!(!m.is_installed(&pm, &dep).unwrap());
@@ -1088,8 +1178,15 @@ mod tests {
 
     #[test]
     fn package_module_install_propagates_pm_error() {
-        let m = PackageModule { default: "go", apt: "golang-go", winget: "GoLang.Go" };
-        let pm = crate::package_manager::MockPackageManager { install_fails: true, ..Default::default() };
+        let m = PackageModule {
+            default: "go",
+            apt: "golang-go",
+            winget: "GoLang.Go",
+        };
+        let pm = crate::package_manager::MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
         let dep = Dependency::simple("go");
         assert!(m.install(&pm, &dep).is_err());
     }
@@ -1148,8 +1245,14 @@ mod tests {
         // \n is whitespace — split_whitespace splits the arg list on it.
         // The token "line2" has no "--" prefix and is skipped; "--key=value" is written normally.
         let content = write_and_read(3306, Some("--key=value\nline2"));
-        assert!(content.contains("key = value"), "Expected valid arg to be written");
-        assert!(!content.contains("line2"), "Bare token after newline must be skipped");
+        assert!(
+            content.contains("key = value"),
+            "Expected valid arg to be written"
+        );
+        assert!(
+            !content.contains("line2"),
+            "Bare token after newline must be skipped"
+        );
     }
 
     #[test]

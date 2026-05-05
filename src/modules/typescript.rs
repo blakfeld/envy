@@ -39,7 +39,10 @@ mod tests {
 
     #[test]
     fn typescript_is_installed_checks_node_formula() {
-        let pm = MockPackageManager { installed: true, ..Default::default() };
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
         let dep = Dependency::simple("typescript");
         assert!(TypeScriptModule.is_installed(&pm, &dep).unwrap());
     }
@@ -52,13 +55,20 @@ mod tests {
     #[test]
     fn typescript_is_installed_false() {
         let pm = MockPackageManager::default();
-        assert!(!TypeScriptModule.is_installed(&pm, &Dependency::simple("typescript")).unwrap());
+        assert!(
+            !TypeScriptModule
+                .is_installed(&pm, &Dependency::simple("typescript"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn typescript_install_propagates_pm_error() {
         // When pm.install_package fails, install must return Err (not Ok(())).
-        let pm = MockPackageManager { install_fails: true, ..Default::default() };
+        let pm = MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
         let dep = Dependency::simple("typescript");
         assert!(TypeScriptModule.install(&pm, &dep).is_err());
     }

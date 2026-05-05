@@ -99,19 +99,31 @@ mod tests {
         if which::which("ejson").is_ok() {
             return;
         }
-        let pm = MockPackageManager { install_fails: true, ..Default::default() };
+        let pm = MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
         assert!(ensure_available(&pm).is_err());
     }
 
     #[test]
     fn filter_secrets_removes_public_key() {
         let mut raw = HashMap::new();
-        raw.insert("_public_key".into(), serde_json::Value::String("abc123".into()));
-        raw.insert("MY_SECRET".into(), serde_json::Value::String("hunter2".into()));
+        raw.insert(
+            "_public_key".into(),
+            serde_json::Value::String("abc123".into()),
+        );
+        raw.insert(
+            "MY_SECRET".into(),
+            serde_json::Value::String("hunter2".into()),
+        );
         raw.insert("OTHER".into(), serde_json::Value::String("val".into()));
 
         let result = filter_secrets(raw);
-        assert!(!result.contains_key("_public_key"), "_public_key must be excluded");
+        assert!(
+            !result.contains_key("_public_key"),
+            "_public_key must be excluded"
+        );
         assert_eq!(result.get("MY_SECRET").map(|s| s.as_str()), Some("hunter2"));
         assert_eq!(result.get("OTHER").map(|s| s.as_str()), Some("val"));
         assert_eq!(result.len(), 2);
@@ -129,9 +141,15 @@ mod tests {
     #[test]
     fn filter_secrets_with_only_public_key_returns_empty() {
         let mut raw = HashMap::new();
-        raw.insert("_public_key".into(), serde_json::Value::String("key".into()));
+        raw.insert(
+            "_public_key".into(),
+            serde_json::Value::String("key".into()),
+        );
         let result = filter_secrets(raw);
-        assert!(result.is_empty(), "_public_key must be the only key filtered out");
+        assert!(
+            result.is_empty(),
+            "_public_key must be the only key filtered out"
+        );
     }
 
     #[test]

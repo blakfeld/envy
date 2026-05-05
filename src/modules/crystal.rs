@@ -37,31 +37,55 @@ mod tests {
 
     #[test]
     fn package_name_winget() {
-        let pm = MockPackageManager { name: "winget", ..Default::default() };
+        let pm = MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "Manas.Crystal");
     }
 
     #[test]
     fn package_name_brew_default() {
-        let pm = MockPackageManager { name: "brew", ..Default::default() };
+        let pm = MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "crystal");
     }
 
     #[test]
     fn is_installed_true() {
-        let pm = MockPackageManager { installed: true, ..Default::default() };
-        assert!(CrystalModule.is_installed(&pm, &Dependency::simple("crystal")).unwrap());
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        assert!(
+            CrystalModule
+                .is_installed(&pm, &Dependency::simple("crystal"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_installed_false() {
         let pm = MockPackageManager::default();
-        assert!(!CrystalModule.is_installed(&pm, &Dependency::simple("crystal")).unwrap());
+        assert!(
+            !CrystalModule
+                .is_installed(&pm, &Dependency::simple("crystal"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn install_propagates_pm_error() {
-        let pm = MockPackageManager { install_fails: true, ..Default::default() };
-        assert!(CrystalModule.install(&pm, &Dependency::simple("crystal")).is_err());
+        let pm = MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            CrystalModule
+                .install(&pm, &Dependency::simple("crystal"))
+                .is_err()
+        );
     }
 }

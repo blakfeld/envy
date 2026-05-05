@@ -166,7 +166,10 @@ mod tests {
     fn parse_winget_version_finds_version_after_id() {
         let stdout = "Name              Id              Version   Available\r\n\
                       Git for Windows   Git.Git         2.43.0    2.44.0\r\n";
-        assert_eq!(parse_winget_version(stdout, "Git.Git"), Some("2.43.0".into()));
+        assert_eq!(
+            parse_winget_version(stdout, "Git.Git"),
+            Some("2.43.0".into())
+        );
     }
 
     #[test]
@@ -192,7 +195,10 @@ mod tests {
     #[test]
     fn parse_winget_version_returns_token_after_id() {
         let stdout = "row  MyApp.ID  2.0.1  available\r\n";
-        assert_eq!(parse_winget_version(stdout, "MyApp.ID"), Some("2.0.1".into()));
+        assert_eq!(
+            parse_winget_version(stdout, "MyApp.ID"),
+            Some("2.0.1".into())
+        );
     }
 
     // ── service_config_dir ────────────────────────────────────────────────────

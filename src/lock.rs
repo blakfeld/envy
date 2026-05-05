@@ -21,8 +21,7 @@ impl LockFile {
         if !path.exists() {
             return Ok(None);
         }
-        let content =
-            std::fs::read_to_string(path).context("Failed to read envy.lock")?;
+        let content = std::fs::read_to_string(path).context("Failed to read envy.lock")?;
         let lock = serde_yaml::from_str(&content).context("Failed to parse envy.lock")?;
         Ok(Some(lock))
     }

@@ -63,7 +63,9 @@ impl Module for MeilisearchModule {
         let mut vars = HashMap::new();
         if let Some(key) = dep.extra.get("master_key").and_then(|v| v.as_str()) {
             vars.insert("MEILI_MASTER_KEY".into(), key.to_string());
-            output::warn("meilisearch master_key written to plaintext shadowenv — consider using ejson secrets instead");
+            output::warn(
+                "meilisearch master_key written to plaintext shadowenv — consider using ejson secrets instead",
+            );
         }
         vars
     }
@@ -119,72 +121,132 @@ mod tests {
         );
         let dep = Dependency::with_extra("meilisearch", extra);
         let vars = MeilisearchModule.env_vars(&dep);
-        assert_eq!(vars.get("MEILI_MASTER_KEY").map(|s| s.as_str()), Some("supersecret"));
+        assert_eq!(
+            vars.get("MEILI_MASTER_KEY").map(|s| s.as_str()),
+            Some("supersecret")
+        );
     }
 
     #[test]
     fn package_name_winget() {
-        let pm = crate::package_manager::MockPackageManager { name: "winget", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "Meilisearch.Meilisearch");
     }
 
     #[test]
     fn package_name_brew_default() {
-        let pm = crate::package_manager::MockPackageManager { name: "brew", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "meilisearch");
     }
 
     #[test]
     fn is_installed_true() {
-        let pm = crate::package_manager::MockPackageManager { installed: true, ..Default::default() };
-        assert!(MeilisearchModule.is_installed(&pm, &Dependency::simple("meilisearch")).unwrap());
+        let pm = crate::package_manager::MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        assert!(
+            MeilisearchModule
+                .is_installed(&pm, &Dependency::simple("meilisearch"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_installed_false() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(!MeilisearchModule.is_installed(&pm, &Dependency::simple("meilisearch")).unwrap());
+        assert!(
+            !MeilisearchModule
+                .is_installed(&pm, &Dependency::simple("meilisearch"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn install_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { install_fails: true, ..Default::default() };
-        assert!(MeilisearchModule.install(&pm, &Dependency::simple("meilisearch")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            MeilisearchModule
+                .install(&pm, &Dependency::simple("meilisearch"))
+                .is_err()
+        );
     }
 
     #[test]
     fn is_running_true() {
-        let pm = crate::package_manager::MockPackageManager { service_running: true, ..Default::default() };
-        assert!(MeilisearchModule.is_running(&pm, &Dependency::simple("meilisearch")).unwrap());
+        let pm = crate::package_manager::MockPackageManager {
+            service_running: true,
+            ..Default::default()
+        };
+        assert!(
+            MeilisearchModule
+                .is_running(&pm, &Dependency::simple("meilisearch"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_running_false() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(!MeilisearchModule.is_running(&pm, &Dependency::simple("meilisearch")).unwrap());
+        assert!(
+            !MeilisearchModule
+                .is_running(&pm, &Dependency::simple("meilisearch"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn start_delegates_to_pm() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(MeilisearchModule.start(&pm, &Dependency::simple("meilisearch")).is_ok());
+        assert!(
+            MeilisearchModule
+                .start(&pm, &Dependency::simple("meilisearch"))
+                .is_ok()
+        );
     }
 
     #[test]
     fn start_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { start_service_fails: true, ..Default::default() };
-        assert!(MeilisearchModule.start(&pm, &Dependency::simple("meilisearch")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            start_service_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            MeilisearchModule
+                .start(&pm, &Dependency::simple("meilisearch"))
+                .is_err()
+        );
     }
 
     #[test]
     fn stop_delegates_to_pm() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(MeilisearchModule.stop(&pm, &Dependency::simple("meilisearch")).is_ok());
+        assert!(
+            MeilisearchModule
+                .stop(&pm, &Dependency::simple("meilisearch"))
+                .is_ok()
+        );
     }
 
     #[test]
     fn stop_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { stop_service_fails: true, ..Default::default() };
-        assert!(MeilisearchModule.stop(&pm, &Dependency::simple("meilisearch")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            stop_service_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            MeilisearchModule
+                .stop(&pm, &Dependency::simple("meilisearch"))
+                .is_err()
+        );
     }
 }

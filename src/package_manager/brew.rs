@@ -137,13 +137,19 @@ impl PackageManager for Homebrew {
 fn validate_tap(tap: &str) -> Result<()> {
     let parts: Vec<&str> = tap.split('/').collect();
     if parts.len() != 2 {
-        bail!("Invalid tap '{}': must be 'org/repo' (exactly one '/')", tap);
+        bail!(
+            "Invalid tap '{}': must be 'org/repo' (exactly one '/')",
+            tap
+        );
     }
     for part in &parts {
         if part.is_empty() {
             bail!("Invalid tap '{}': org and repo must not be empty", tap);
         }
-        if !part.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.') {
+        if !part
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.')
+        {
             bail!(
                 "Invalid tap '{}': only alphanumeric characters, hyphens, underscores, and dots are allowed",
                 tap
@@ -189,7 +195,10 @@ mod tests {
     fn brew_bin_returns_non_empty_path() {
         let b = Homebrew::new().brew_bin();
         assert!(!b.is_empty(), "brew_bin must not be empty");
-        assert!(b.contains("brew"), "Expected path to contain 'brew', got: {b}");
+        assert!(
+            b.contains("brew"),
+            "Expected path to contain 'brew', got: {b}"
+        );
     }
 
     #[test]
@@ -216,11 +225,15 @@ mod tests {
     #[test]
     fn parse_brew_service_running_requires_both_conditions() {
         let stdout = "nginx stopped\n";
-        assert!(!parse_brew_service_running(stdout, "nginx"),
-            "stopped service must not report as running");
+        assert!(
+            !parse_brew_service_running(stdout, "nginx"),
+            "stopped service must not report as running"
+        );
         let stdout2 = "other started\nnginx none\n";
-        assert!(!parse_brew_service_running(stdout2, "nginx"),
-            "nginx must not match 'other started' line");
+        assert!(
+            !parse_brew_service_running(stdout2, "nginx"),
+            "nginx must not match 'other started' line"
+        );
     }
 
     #[test]
@@ -233,7 +246,10 @@ mod tests {
     #[test]
     fn parse_brew_version_extracts_second_token() {
         assert_eq!(parse_brew_version("mysql 8.0.36"), Some("8.0.36".into()));
-        assert_eq!(parse_brew_version("node@20 20.11.0"), Some("20.11.0".into()));
+        assert_eq!(
+            parse_brew_version("node@20 20.11.0"),
+            Some("20.11.0".into())
+        );
     }
 
     #[test]

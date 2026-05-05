@@ -153,44 +153,79 @@ mod tests {
 
     #[test]
     fn package_name_winget() {
-        let pm = crate::package_manager::MockPackageManager { name: "winget", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "Hashicorp.Vault");
     }
 
     #[test]
     fn package_name_brew_default() {
-        let pm = crate::package_manager::MockPackageManager { name: "brew", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "vault");
     }
 
     #[test]
     fn is_installed_true() {
-        let pm = crate::package_manager::MockPackageManager { installed: true, ..Default::default() };
-        assert!(VaultModule.is_installed(&pm, &Dependency::simple("vault")).unwrap());
+        let pm = crate::package_manager::MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        assert!(
+            VaultModule
+                .is_installed(&pm, &Dependency::simple("vault"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_installed_false() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(!VaultModule.is_installed(&pm, &Dependency::simple("vault")).unwrap());
+        assert!(
+            !VaultModule
+                .is_installed(&pm, &Dependency::simple("vault"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn install_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { install_fails: true, ..Default::default() };
-        assert!(VaultModule.install(&pm, &Dependency::simple("vault")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            VaultModule
+                .install(&pm, &Dependency::simple("vault"))
+                .is_err()
+        );
     }
 
     #[test]
     fn is_running_true() {
-        let pm = crate::package_manager::MockPackageManager { service_running: true, ..Default::default() };
-        assert!(VaultModule.is_running(&pm, &Dependency::simple("vault")).unwrap());
+        let pm = crate::package_manager::MockPackageManager {
+            service_running: true,
+            ..Default::default()
+        };
+        assert!(
+            VaultModule
+                .is_running(&pm, &Dependency::simple("vault"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_running_false() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(!VaultModule.is_running(&pm, &Dependency::simple("vault")).unwrap());
+        assert!(
+            !VaultModule
+                .is_running(&pm, &Dependency::simple("vault"))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -201,8 +236,15 @@ mod tests {
 
     #[test]
     fn start_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { start_service_fails: true, ..Default::default() };
-        assert!(VaultModule.start(&pm, &Dependency::simple("vault")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            start_service_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            VaultModule
+                .start(&pm, &Dependency::simple("vault"))
+                .is_err()
+        );
     }
 
     #[test]
@@ -213,7 +255,10 @@ mod tests {
 
     #[test]
     fn stop_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { stop_service_fails: true, ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            stop_service_fails: true,
+            ..Default::default()
+        };
         assert!(VaultModule.stop(&pm, &Dependency::simple("vault")).is_err());
     }
 
@@ -221,6 +266,9 @@ mod tests {
     fn env_vars_addr_uses_custom_port() {
         let dep = dep_with_port(8201);
         let vars = VaultModule.env_vars(&dep);
-        assert_eq!(vars.get("VAULT_ADDR").map(|s| s.as_str()), Some("http://127.0.0.1:8201"));
+        assert_eq!(
+            vars.get("VAULT_ADDR").map(|s| s.as_str()),
+            Some("http://127.0.0.1:8201")
+        );
     }
 }

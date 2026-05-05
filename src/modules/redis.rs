@@ -81,50 +81,88 @@ mod tests {
 
     #[test]
     fn package_name_apt() {
-        let pm = MockPackageManager { name: "apt", ..Default::default() };
+        let pm = MockPackageManager {
+            name: "apt",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "redis-server");
     }
 
     #[test]
     fn package_name_winget() {
-        let pm = MockPackageManager { name: "winget", ..Default::default() };
+        let pm = MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "Redis.Redis");
     }
 
     #[test]
     fn package_name_brew_default() {
-        let pm = MockPackageManager { name: "brew", ..Default::default() };
+        let pm = MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "redis");
     }
 
     #[test]
     fn is_installed_true() {
-        let pm = MockPackageManager { installed: true, ..Default::default() };
-        assert!(RedisModule.is_installed(&pm, &Dependency::simple("redis")).unwrap());
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        assert!(
+            RedisModule
+                .is_installed(&pm, &Dependency::simple("redis"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_installed_false() {
         let pm = MockPackageManager::default();
-        assert!(!RedisModule.is_installed(&pm, &Dependency::simple("redis")).unwrap());
+        assert!(
+            !RedisModule
+                .is_installed(&pm, &Dependency::simple("redis"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn install_propagates_pm_error() {
-        let pm = MockPackageManager { install_fails: true, ..Default::default() };
-        assert!(RedisModule.install(&pm, &Dependency::simple("redis")).is_err());
+        let pm = MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            RedisModule
+                .install(&pm, &Dependency::simple("redis"))
+                .is_err()
+        );
     }
 
     #[test]
     fn is_running_true() {
-        let pm = MockPackageManager { service_running: true, ..Default::default() };
-        assert!(RedisModule.is_running(&pm, &Dependency::simple("redis")).unwrap());
+        let pm = MockPackageManager {
+            service_running: true,
+            ..Default::default()
+        };
+        assert!(
+            RedisModule
+                .is_running(&pm, &Dependency::simple("redis"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_running_false() {
         let pm = MockPackageManager::default();
-        assert!(!RedisModule.is_running(&pm, &Dependency::simple("redis")).unwrap());
+        assert!(
+            !RedisModule
+                .is_running(&pm, &Dependency::simple("redis"))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -135,8 +173,15 @@ mod tests {
 
     #[test]
     fn start_propagates_pm_error() {
-        let pm = MockPackageManager { start_service_fails: true, ..Default::default() };
-        assert!(RedisModule.start(&pm, &Dependency::simple("redis")).is_err());
+        let pm = MockPackageManager {
+            start_service_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            RedisModule
+                .start(&pm, &Dependency::simple("redis"))
+                .is_err()
+        );
     }
 
     #[test]
@@ -147,7 +192,10 @@ mod tests {
 
     #[test]
     fn stop_propagates_pm_error() {
-        let pm = MockPackageManager { stop_service_fails: true, ..Default::default() };
+        let pm = MockPackageManager {
+            stop_service_fails: true,
+            ..Default::default()
+        };
         assert!(RedisModule.stop(&pm, &Dependency::simple("redis")).is_err());
     }
 }

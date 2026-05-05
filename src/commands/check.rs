@@ -9,7 +9,11 @@ use crate::package_manager::PackageManager;
 
 use super::shared;
 
-pub(crate) fn check_impl(config: &EnvyConfig, pm: &dyn PackageManager, profile: &str) -> Result<()> {
+pub(crate) fn check_impl(
+    config: &EnvyConfig,
+    pm: &dyn PackageManager,
+    profile: &str,
+) -> Result<()> {
     let project_name = config.name.as_deref().unwrap_or("project");
     output::header(&format!("envy check · {} [{}]", project_name, profile));
 
@@ -58,7 +62,8 @@ mod tests {
     fn make_config(dep_names: &[&str], env: HashMap<String, String>) -> EnvyConfig {
         EnvyConfig {
             name: Some("test".into()),
-            dependencies: dep_names.iter()
+            dependencies: dep_names
+                .iter()
                 .map(|n| RawDependency::Simple(n.to_string()))
                 .collect(),
             environment: env,
@@ -71,7 +76,10 @@ mod tests {
     #[test]
     fn check_impl_returns_ok_when_all_installed() {
         let config = make_config(&["node"], HashMap::new());
-        let pm = MockPackageManager { installed: true, ..Default::default() };
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
         assert!(check_impl(&config, &pm, "dev").is_ok());
     }
 
@@ -114,7 +122,10 @@ mod tests {
     fn check_impl_zero_issues_returns_ok() {
         // Kills `replace == with != at line 32` — with mutation, zero issues would return Err.
         let config = make_config(&["node"], HashMap::new());
-        let pm = MockPackageManager { installed: true, ..Default::default() };
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
         assert!(check_impl(&config, &pm, "dev").is_ok());
     }
 
@@ -125,7 +136,10 @@ mod tests {
         let config = make_config(&["mysql"], HashMap::new()); // mysql is a service
         let pm = MockPackageManager::default(); // installed=false
         let result = check_impl(&config, &pm, "dev");
-        assert!(result.is_err(), "not-installed service must count as an issue");
+        assert!(
+            result.is_err(),
+            "not-installed service must count as an issue"
+        );
     }
 
     #[test]
@@ -140,7 +154,10 @@ mod tests {
         let pm = MockPackageManager::default();
         // print_env_table with bold_errors=true and no shadowenv file returns env.len() = 1 issue.
         let result = check_impl(&config, &pm, "dev");
-        assert!(result.is_err(), "a missing env var must be counted as an issue");
+        assert!(
+            result.is_err(),
+            "a missing env var must be counted as an issue"
+        );
     }
 
     #[test]

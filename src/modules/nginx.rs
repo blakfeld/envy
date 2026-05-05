@@ -17,10 +17,7 @@ fn package_name(pm: &dyn PackageManager) -> &'static str {
 }
 
 fn port(dep: &Dependency) -> u16 {
-    dep.extra
-        .get("port")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(80) as u16
+    dep.extra.get("port").and_then(|v| v.as_u64()).unwrap_or(80) as u16
 }
 
 impl Module for NginxModule {
@@ -82,44 +79,79 @@ mod tests {
 
     #[test]
     fn package_name_winget() {
-        let pm = crate::package_manager::MockPackageManager { name: "winget", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "Nginx.Nginx");
     }
 
     #[test]
     fn package_name_brew_default() {
-        let pm = crate::package_manager::MockPackageManager { name: "brew", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "nginx");
     }
 
     #[test]
     fn is_installed_true() {
-        let pm = crate::package_manager::MockPackageManager { installed: true, ..Default::default() };
-        assert!(NginxModule.is_installed(&pm, &Dependency::simple("nginx")).unwrap());
+        let pm = crate::package_manager::MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        assert!(
+            NginxModule
+                .is_installed(&pm, &Dependency::simple("nginx"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_installed_false() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(!NginxModule.is_installed(&pm, &Dependency::simple("nginx")).unwrap());
+        assert!(
+            !NginxModule
+                .is_installed(&pm, &Dependency::simple("nginx"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn install_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { install_fails: true, ..Default::default() };
-        assert!(NginxModule.install(&pm, &Dependency::simple("nginx")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            NginxModule
+                .install(&pm, &Dependency::simple("nginx"))
+                .is_err()
+        );
     }
 
     #[test]
     fn is_running_true() {
-        let pm = crate::package_manager::MockPackageManager { service_running: true, ..Default::default() };
-        assert!(NginxModule.is_running(&pm, &Dependency::simple("nginx")).unwrap());
+        let pm = crate::package_manager::MockPackageManager {
+            service_running: true,
+            ..Default::default()
+        };
+        assert!(
+            NginxModule
+                .is_running(&pm, &Dependency::simple("nginx"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_running_false() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(!NginxModule.is_running(&pm, &Dependency::simple("nginx")).unwrap());
+        assert!(
+            !NginxModule
+                .is_running(&pm, &Dependency::simple("nginx"))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -130,8 +162,15 @@ mod tests {
 
     #[test]
     fn start_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { start_service_fails: true, ..Default::default() };
-        assert!(NginxModule.start(&pm, &Dependency::simple("nginx")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            start_service_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            NginxModule
+                .start(&pm, &Dependency::simple("nginx"))
+                .is_err()
+        );
     }
 
     #[test]
@@ -142,7 +181,10 @@ mod tests {
 
     #[test]
     fn stop_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { stop_service_fails: true, ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            stop_service_fails: true,
+            ..Default::default()
+        };
         assert!(NginxModule.stop(&pm, &Dependency::simple("nginx")).is_err());
     }
 }

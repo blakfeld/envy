@@ -139,7 +139,10 @@ impl Dependency {
 
     #[cfg(test)]
     pub fn with_extra(name: &str, extra: HashMap<String, serde_yaml::Value>) -> Self {
-        Self { extra, ..Self::simple(name) }
+        Self {
+            extra,
+            ..Self::simple(name)
+        }
     }
 
     pub fn versioned_name(&self) -> String {
@@ -161,8 +164,9 @@ impl Dependency {
 
 impl EnvyConfig {
     pub fn load_default() -> Result<Self> {
-        let path = Self::find_config()
-            .ok_or_else(|| anyhow::anyhow!("envy.yml not found — are you inside an envy project?"))?;
+        let path = Self::find_config().ok_or_else(|| {
+            anyhow::anyhow!("envy.yml not found — are you inside an envy project?")
+        })?;
         Self::load(&path)
     }
 
@@ -429,7 +433,8 @@ mod tests {
 
     #[test]
     fn normalized_deps_after_install_preserved() {
-        let yaml = "dependencies:\n  - mysql:\n      after_install: \"mysql_secure_installation\"\n";
+        let yaml =
+            "dependencies:\n  - mysql:\n      after_install: \"mysql_secure_installation\"\n";
         let config: EnvyConfig = serde_yaml::from_str(yaml).unwrap();
         let deps = config.normalized_dependencies("dev");
         assert_eq!(
@@ -479,12 +484,17 @@ mod tests {
     // helper are serialised by ENV_CD_LOCK to avoid interfering with other tests.
     static ENV_CD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    fn with_cwd<F: FnOnce() -> Option<std::path::PathBuf>>(dir: &std::path::Path, f: F) -> Option<std::path::PathBuf> {
+    fn with_cwd<F: FnOnce() -> Option<std::path::PathBuf>>(
+        dir: &std::path::Path,
+        f: F,
+    ) -> Option<std::path::PathBuf> {
         let _guard = ENV_CD_LOCK.lock().unwrap();
         let orig = std::env::current_dir().ok();
         std::env::set_current_dir(dir).unwrap();
         let result = f();
-        if let Some(o) = orig { let _ = std::env::set_current_dir(o); }
+        if let Some(o) = orig {
+            let _ = std::env::set_current_dir(o);
+        }
         result
     }
 
@@ -543,7 +553,10 @@ mod tests {
         // We can't assert None here unconditionally since there might be an envy.yml
         // higher in the real tree; just verify it doesn't find one IN our temp root.
         if let Some(ref p) = found {
-            assert!(!p.starts_with(&root), "find_config must not return a path inside our tempdir that has no envy.yml");
+            assert!(
+                !p.starts_with(&root),
+                "find_config must not return a path inside our tempdir that has no envy.yml"
+            );
         }
         let _ = std::fs::remove_dir_all(&root);
     }

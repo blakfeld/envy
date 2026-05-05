@@ -37,31 +37,55 @@ mod tests {
 
     #[test]
     fn package_name_winget() {
-        let pm = MockPackageManager { name: "winget", ..Default::default() };
+        let pm = MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "Dart.Dart");
     }
 
     #[test]
     fn package_name_brew_default() {
-        let pm = MockPackageManager { name: "brew", ..Default::default() };
+        let pm = MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "dart");
     }
 
     #[test]
     fn is_installed_true() {
-        let pm = MockPackageManager { installed: true, ..Default::default() };
-        assert!(DartModule.is_installed(&pm, &Dependency::simple("dart")).unwrap());
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        assert!(
+            DartModule
+                .is_installed(&pm, &Dependency::simple("dart"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_installed_false() {
         let pm = MockPackageManager::default();
-        assert!(!DartModule.is_installed(&pm, &Dependency::simple("dart")).unwrap());
+        assert!(
+            !DartModule
+                .is_installed(&pm, &Dependency::simple("dart"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn install_propagates_pm_error() {
-        let pm = MockPackageManager { install_fails: true, ..Default::default() };
-        assert!(DartModule.install(&pm, &Dependency::simple("dart")).is_err());
+        let pm = MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            DartModule
+                .install(&pm, &Dependency::simple("dart"))
+                .is_err()
+        );
     }
 }

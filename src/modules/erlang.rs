@@ -36,37 +36,64 @@ mod tests {
 
     #[test]
     fn package_name_winget() {
-        let pm = MockPackageManager { name: "winget", ..Default::default() };
+        let pm = MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "Erlang-Solutions.Erlang");
     }
 
     #[test]
     fn package_name_brew_default() {
-        let pm = MockPackageManager { name: "brew", ..Default::default() };
+        let pm = MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "erlang");
     }
 
     #[test]
     fn package_name_apt_default() {
-        let pm = MockPackageManager { name: "apt", ..Default::default() };
+        let pm = MockPackageManager {
+            name: "apt",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "erlang");
     }
 
     #[test]
     fn is_installed_true() {
-        let pm = MockPackageManager { installed: true, ..Default::default() };
-        assert!(ErlangModule.is_installed(&pm, &Dependency::simple("erlang")).unwrap());
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        assert!(
+            ErlangModule
+                .is_installed(&pm, &Dependency::simple("erlang"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_installed_false() {
         let pm = MockPackageManager::default();
-        assert!(!ErlangModule.is_installed(&pm, &Dependency::simple("erlang")).unwrap());
+        assert!(
+            !ErlangModule
+                .is_installed(&pm, &Dependency::simple("erlang"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn install_propagates_pm_error() {
-        let pm = MockPackageManager { install_fails: true, ..Default::default() };
-        assert!(ErlangModule.install(&pm, &Dependency::simple("erlang")).is_err());
+        let pm = MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            ErlangModule
+                .install(&pm, &Dependency::simple("erlang"))
+                .is_err()
+        );
     }
 }

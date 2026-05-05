@@ -234,21 +234,27 @@ mod tests {
 
     #[test]
     fn all_builtin_subcommands_appear_in_zsh_snippet() {
-        for cmd in &["up", "down", "services", "start", "stop", "restart", "status", "check", "init", "hook"] {
+        for cmd in &[
+            "up", "down", "services", "start", "stop", "restart", "status", "check", "init", "hook",
+        ] {
             assert!(ZSH_SNIPPET.contains(cmd), "zsh snippet missing '{}'", cmd);
         }
     }
 
     #[test]
     fn all_builtin_subcommands_appear_in_bash_snippet() {
-        for cmd in &["up", "down", "services", "start", "stop", "restart", "status", "check", "init", "hook"] {
+        for cmd in &[
+            "up", "down", "services", "start", "stop", "restart", "status", "check", "init", "hook",
+        ] {
             assert!(BASH_SNIPPET.contains(cmd), "bash snippet missing '{}'", cmd);
         }
     }
 
     #[test]
     fn all_builtin_subcommands_appear_in_fish_snippet() {
-        for cmd in &["up", "down", "services", "start", "stop", "restart", "status", "check", "init", "hook"] {
+        for cmd in &[
+            "up", "down", "services", "start", "stop", "restart", "status", "check", "init", "hook",
+        ] {
             assert!(FISH_SNIPPET.contains(cmd), "fish snippet missing '{}'", cmd);
         }
     }

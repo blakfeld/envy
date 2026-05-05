@@ -56,7 +56,11 @@ impl Module for BunModule {
         Ok(())
     }
 
-    fn resolved_version(&self, _pm: &dyn PackageManager, _dep: &Dependency) -> Result<Option<String>> {
+    fn resolved_version(
+        &self,
+        _pm: &dyn PackageManager,
+        _dep: &Dependency,
+    ) -> Result<Option<String>> {
         let path = bun_bin()
             .filter(|b| std::path::Path::new(b).exists())
             .unwrap_or_else(|| "bun".to_string());
@@ -89,9 +93,15 @@ mod tests {
     #[test]
     fn bun_bin_returns_some_with_non_empty_home() {
         // On any normal system HOME is set and non-empty, so bun_bin() should return Some.
-        if std::env::var("HOME").map(|h| !h.is_empty()).unwrap_or(false) {
+        if std::env::var("HOME")
+            .map(|h| !h.is_empty())
+            .unwrap_or(false)
+        {
             let bin = bun_bin().unwrap();
-            assert!(bin.contains(".bun/bin/bun"), "Expected ~/.bun/bin/bun, got {bin}");
+            assert!(
+                bin.contains(".bun/bin/bun"),
+                "Expected ~/.bun/bin/bun, got {bin}"
+            );
         }
     }
 
@@ -115,17 +125,24 @@ mod tests {
     #[test]
     fn bun_is_installed_true_when_bin_file_exists_and_not_on_path() {
         // Only runs when bun is NOT on PATH (to avoid modifying real installations).
-        if which("bun").is_ok() { return; }
+        if which("bun").is_ok() {
+            return;
+        }
         if let Some(bin_path) = bun_bin() {
             let path = std::path::Path::new(&bin_path);
-            if path.exists() { return; }
+            if path.exists() {
+                return;
+            }
             std::fs::create_dir_all(path.parent().unwrap()).ok();
             std::fs::write(&bin_path, b"#!/bin/sh").ok();
             let pm = MockPackageManager::default();
             let dep = Dependency::simple("bun");
             let result = BunModule.is_installed(&pm, &dep).unwrap();
             std::fs::remove_file(&bin_path).ok();
-            assert!(result, "Expected is_installed=true when bun binary exists at {bin_path}");
+            assert!(
+                result,
+                "Expected is_installed=true when bun binary exists at {bin_path}"
+            );
         }
     }
 
@@ -139,21 +156,30 @@ mod tests {
 
     #[test]
     fn bun_resolved_version_is_non_empty_when_installed() {
-        if which("bun").is_err() { return; }
+        if which("bun").is_err() {
+            return;
+        }
         let pm = MockPackageManager::default();
         let dep = Dependency::simple("bun");
         let ver = BunModule.resolved_version(&pm, &dep).unwrap();
         assert!(ver.is_some(), "Expected Some version when bun is on PATH");
-        assert!(!ver.unwrap().is_empty(), "Expected non-empty version string");
+        assert!(
+            !ver.unwrap().is_empty(),
+            "Expected non-empty version string"
+        );
     }
 
     #[test]
     fn bun_is_installed_false_when_not_on_path_and_no_bin_file() {
         // Skip if bun is reachable via PATH — can't test the false case then.
-        if which("bun").is_ok() { return; }
+        if which("bun").is_ok() {
+            return;
+        }
         // Also skip if the bun_bin() path already exists (e.g. ~/.bun/bin/bun).
         if let Some(p) = bun_bin() {
-            if std::path::Path::new(&p).exists() { return; }
+            if std::path::Path::new(&p).exists() {
+                return;
+            }
         }
         let pm = MockPackageManager::default();
         let dep = Dependency::simple("bun");
@@ -165,33 +191,49 @@ mod tests {
 
     #[test]
     fn bun_resolved_version_is_none_when_bun_not_installed() {
-        if which("bun").is_ok() { return; }
+        if which("bun").is_ok() {
+            return;
+        }
         if let Some(p) = bun_bin() {
-            if std::path::Path::new(&p).exists() { return; }
+            if std::path::Path::new(&p).exists() {
+                return;
+            }
         }
         let pm = MockPackageManager::default();
         let dep = Dependency::simple("bun");
         let ver = BunModule.resolved_version(&pm, &dep).unwrap();
-        assert!(ver.is_none(), "Expected None version when bun is not installed");
+        assert!(
+            ver.is_none(),
+            "Expected None version when bun is not installed"
+        );
     }
 
     #[test]
     fn bun_install_fails_when_script_exits_nonzero() {
         // Uses ENVY_TEST_BUN_INSTALL_SCRIPT to inject a failing script.
         // Only this test sets this variable; no other bun test reads it.
-        unsafe { std::env::set_var("ENVY_TEST_BUN_INSTALL_SCRIPT", "exit 1"); }
+        unsafe {
+            std::env::set_var("ENVY_TEST_BUN_INSTALL_SCRIPT", "exit 1");
+        }
         let pm = MockPackageManager::default();
         let dep = Dependency::simple("bun");
         let result = BunModule.install(&pm, &dep);
-        unsafe { std::env::remove_var("ENVY_TEST_BUN_INSTALL_SCRIPT"); }
-        assert!(result.is_err(), "install must return Err when script exits non-zero");
+        unsafe {
+            std::env::remove_var("ENVY_TEST_BUN_INSTALL_SCRIPT");
+        }
+        assert!(
+            result.is_err(),
+            "install must return Err when script exits non-zero"
+        );
     }
 
     #[test]
     fn bun_resolved_version_contains_dot_when_installed() {
         if which("bun").is_err() {
             if let Some(p) = bun_bin() {
-                if !std::path::Path::new(&p).exists() { return; }
+                if !std::path::Path::new(&p).exists() {
+                    return;
+                }
             } else {
                 return;
             }

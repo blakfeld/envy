@@ -101,67 +101,124 @@ mod tests {
 
     #[test]
     fn package_name_winget() {
-        let pm = crate::package_manager::MockPackageManager { name: "winget", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "Memcached.Memcached");
     }
 
     #[test]
     fn package_name_brew_default() {
-        let pm = crate::package_manager::MockPackageManager { name: "brew", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "memcached");
     }
 
     #[test]
     fn is_installed_true() {
-        let pm = crate::package_manager::MockPackageManager { installed: true, ..Default::default() };
-        assert!(MemcachedModule.is_installed(&pm, &Dependency::simple("memcached")).unwrap());
+        let pm = crate::package_manager::MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        assert!(
+            MemcachedModule
+                .is_installed(&pm, &Dependency::simple("memcached"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_installed_false() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(!MemcachedModule.is_installed(&pm, &Dependency::simple("memcached")).unwrap());
+        assert!(
+            !MemcachedModule
+                .is_installed(&pm, &Dependency::simple("memcached"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn install_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { install_fails: true, ..Default::default() };
-        assert!(MemcachedModule.install(&pm, &Dependency::simple("memcached")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            MemcachedModule
+                .install(&pm, &Dependency::simple("memcached"))
+                .is_err()
+        );
     }
 
     #[test]
     fn is_running_true() {
-        let pm = crate::package_manager::MockPackageManager { service_running: true, ..Default::default() };
-        assert!(MemcachedModule.is_running(&pm, &Dependency::simple("memcached")).unwrap());
+        let pm = crate::package_manager::MockPackageManager {
+            service_running: true,
+            ..Default::default()
+        };
+        assert!(
+            MemcachedModule
+                .is_running(&pm, &Dependency::simple("memcached"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_running_false() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(!MemcachedModule.is_running(&pm, &Dependency::simple("memcached")).unwrap());
+        assert!(
+            !MemcachedModule
+                .is_running(&pm, &Dependency::simple("memcached"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn start_delegates_to_pm() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(MemcachedModule.start(&pm, &Dependency::simple("memcached")).is_ok());
+        assert!(
+            MemcachedModule
+                .start(&pm, &Dependency::simple("memcached"))
+                .is_ok()
+        );
     }
 
     #[test]
     fn start_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { start_service_fails: true, ..Default::default() };
-        assert!(MemcachedModule.start(&pm, &Dependency::simple("memcached")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            start_service_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            MemcachedModule
+                .start(&pm, &Dependency::simple("memcached"))
+                .is_err()
+        );
     }
 
     #[test]
     fn stop_delegates_to_pm() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(MemcachedModule.stop(&pm, &Dependency::simple("memcached")).is_ok());
+        assert!(
+            MemcachedModule
+                .stop(&pm, &Dependency::simple("memcached"))
+                .is_ok()
+        );
     }
 
     #[test]
     fn stop_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { stop_service_fails: true, ..Default::default() };
-        assert!(MemcachedModule.stop(&pm, &Dependency::simple("memcached")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            stop_service_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            MemcachedModule
+                .stop(&pm, &Dependency::simple("memcached"))
+                .is_err()
+        );
     }
 }

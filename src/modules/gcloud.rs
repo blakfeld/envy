@@ -38,15 +38,19 @@ impl Module for GcloudModule {
 
                 #[cfg(test)]
                 let installer_cmd = std::env::var("ENVY_TEST_GCLOUD_INSTALL_SCRIPT")
-                    .unwrap_or_else(|_| concat!(
-                        "curl -fsSL https://sdk.cloud.google.com",
-                        " | bash -s -- --disable-prompts \"--install-dir=$ENVY_GCLOUD_HOME\""
-                    ).to_string());
+                    .unwrap_or_else(|_| {
+                        concat!(
+                            "curl -fsSL https://sdk.cloud.google.com",
+                            " | bash -s -- --disable-prompts \"--install-dir=$ENVY_GCLOUD_HOME\""
+                        )
+                        .to_string()
+                    });
                 #[cfg(not(test))]
                 let installer_cmd = concat!(
                     "curl -fsSL https://sdk.cloud.google.com",
                     " | bash -s -- --disable-prompts \"--install-dir=$ENVY_GCLOUD_HOME\""
-                ).to_string();
+                )
+                .to_string();
 
                 let status = Command::new("sh")
                     .arg("-c")
@@ -70,7 +74,11 @@ impl Module for GcloudModule {
         Ok(())
     }
 
-    fn resolved_version(&self, _pm: &dyn PackageManager, _dep: &Dependency) -> Result<Option<String>> {
+    fn resolved_version(
+        &self,
+        _pm: &dyn PackageManager,
+        _dep: &Dependency,
+    ) -> Result<Option<String>> {
         let out = Command::new("gcloud").arg("version").output();
         // "Google Cloud SDK 468.0.0\n..." — take third token of first line
         Ok(out.ok().and_then(|o| {
@@ -130,13 +138,19 @@ mod tests {
 
     #[test]
     fn package_name_winget() {
-        let pm = crate::package_manager::MockPackageManager { name: "winget", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "Google.CloudSDK");
     }
 
     #[test]
     fn package_name_brew_default() {
-        let pm = crate::package_manager::MockPackageManager { name: "brew", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "google-cloud-sdk");
     }
 
@@ -186,7 +200,9 @@ mod tests {
 
     #[test]
     fn gcloud_is_installed_false_when_not_on_path() {
-        if which("gcloud").is_ok() { return; }
+        if which("gcloud").is_ok() {
+            return;
+        }
         let pm = crate::package_manager::MockPackageManager::default();
         let dep = Dependency::simple("gcloud");
         assert!(
@@ -197,7 +213,9 @@ mod tests {
 
     #[test]
     fn gcloud_is_installed_true_when_on_path() {
-        if which("gcloud").is_err() { return; }
+        if which("gcloud").is_err() {
+            return;
+        }
         let pm = crate::package_manager::MockPackageManager::default();
         let dep = Dependency::simple("gcloud");
         assert!(GcloudModule.is_installed(&pm, &dep).unwrap());
@@ -205,11 +223,16 @@ mod tests {
 
     #[test]
     fn gcloud_resolved_version_is_none_when_not_installed() {
-        if which("gcloud").is_ok() { return; }
+        if which("gcloud").is_ok() {
+            return;
+        }
         let pm = crate::package_manager::MockPackageManager::default();
         let dep = Dependency::simple("gcloud");
         let ver = GcloudModule.resolved_version(&pm, &dep).unwrap();
-        assert!(ver.is_none(), "Expected None version when gcloud is not on PATH");
+        assert!(
+            ver.is_none(),
+            "Expected None version when gcloud is not on PATH"
+        );
     }
 
     #[test]
@@ -228,7 +251,10 @@ mod tests {
 
     #[test]
     fn package_name_apt_returns_google_cloud_sdk() {
-        let pm = crate::package_manager::MockPackageManager { name: "apt", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "apt",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "google-cloud-sdk");
     }
 
@@ -236,7 +262,10 @@ mod tests {
     fn gcloud_install_brew_calls_pm_install_package() {
         // Kills `delete match arm "brew" | "winget"` — without the arm, brew falls through
         // to the script path and install_package is never called.
-        let pm = crate::package_manager::MockPackageManager { name: "brew", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         let dep = Dependency::simple("gcloud");
         GcloudModule.install(&pm, &dep).ok();
         assert!(
@@ -249,17 +278,29 @@ mod tests {
     fn gcloud_install_apt_script_failure_propagated() {
         // When PM is not brew/winget, install runs the gcloud installer script.
         // Uses ENVY_TEST_GCLOUD_INSTALL_SCRIPT to inject a failing script.
-        unsafe { std::env::set_var("ENVY_TEST_GCLOUD_INSTALL_SCRIPT", "exit 1"); }
-        let pm = crate::package_manager::MockPackageManager { name: "apt", ..Default::default() };
+        unsafe {
+            std::env::set_var("ENVY_TEST_GCLOUD_INSTALL_SCRIPT", "exit 1");
+        }
+        let pm = crate::package_manager::MockPackageManager {
+            name: "apt",
+            ..Default::default()
+        };
         let dep = Dependency::simple("gcloud");
         let result = GcloudModule.install(&pm, &dep);
-        unsafe { std::env::remove_var("ENVY_TEST_GCLOUD_INSTALL_SCRIPT"); }
-        assert!(result.is_err(), "install must fail when installer script exits non-zero");
+        unsafe {
+            std::env::remove_var("ENVY_TEST_GCLOUD_INSTALL_SCRIPT");
+        }
+        assert!(
+            result.is_err(),
+            "install must fail when installer script exits non-zero"
+        );
     }
 
     #[test]
     fn gcloud_resolved_version_contains_dot_when_installed() {
-        if which("gcloud").is_err() { return; }
+        if which("gcloud").is_err() {
+            return;
+        }
         let pm = crate::package_manager::MockPackageManager::default();
         let dep = Dependency::simple("gcloud");
         let ver = GcloudModule.resolved_version(&pm, &dep).unwrap();

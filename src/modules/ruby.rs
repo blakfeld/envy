@@ -46,8 +46,15 @@ mod tests {
 
     #[test]
     fn ruby_is_installed_true() {
-        let pm = MockPackageManager { installed: true, ..Default::default() };
-        assert!(RubyModule.is_installed(&pm, &Dependency::simple("ruby")).unwrap());
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        assert!(
+            RubyModule
+                .is_installed(&pm, &Dependency::simple("ruby"))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -59,7 +66,14 @@ mod tests {
 
     #[test]
     fn ruby_install_propagates_pm_error() {
-        let pm = MockPackageManager { install_fails: true, ..Default::default() };
-        assert!(RubyModule.install(&pm, &Dependency::simple("ruby")).is_err());
+        let pm = MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            RubyModule
+                .install(&pm, &Dependency::simple("ruby"))
+                .is_err()
+        );
     }
 }

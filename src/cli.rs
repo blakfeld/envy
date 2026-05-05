@@ -107,7 +107,9 @@ impl Cli {
                 dry_run: false,
                 profile,
             } => commands::up::run(*update, profile),
-            Commands::Init { force } => commands::init::run(*force, std::path::Path::new("envy.yml")),
+            Commands::Init { force } => {
+                commands::init::run(*force, std::path::Path::new("envy.yml"))
+            }
             Commands::Services { profile } => commands::service::list(profile),
             Commands::Start { name, profile } => commands::service::start(name, profile),
             Commands::Stop { name, profile } => commands::service::stop(name, profile),
@@ -137,7 +139,8 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "envy_cli_{}_{}", std::process::id(),
+            "envy_cli_{}_{}",
+            std::process::id(),
             N.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).unwrap();
@@ -145,7 +148,9 @@ mod tests {
         let orig = std::env::current_dir().ok();
         std::env::set_current_dir(&dir).unwrap();
         let result = f();
-        if let Some(o) = orig { let _ = std::env::set_current_dir(o); }
+        if let Some(o) = orig {
+            let _ = std::env::set_current_dir(o);
+        }
         let _ = std::fs::remove_dir_all(&dir);
         result
     }
@@ -158,7 +163,10 @@ mod tests {
             let cli = Cli::parse_from(["envy", "check"]);
             cli.run()
         });
-        assert!(result.is_err(), "check must return Err when no envy.yml exists");
+        assert!(
+            result.is_err(),
+            "check must return Err when no envy.yml exists"
+        );
     }
 
     #[test]

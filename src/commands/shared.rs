@@ -16,7 +16,10 @@ mod tests {
 
     #[test]
     fn print_dep_table_returns_zero_when_all_installed() {
-        let pm = MockPackageManager { installed: true, ..Default::default() };
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
         let deps = vec![Dependency::simple("node"), Dependency::simple("python")];
         let issues = print_dep_table(&deps, &pm, false).unwrap();
         assert_eq!(issues, 0, "no issues when all deps are installed");
@@ -57,7 +60,11 @@ mod tests {
     #[test]
     fn print_dep_table_counts_stopped_service_as_issue() {
         // Kills `replace += with -=` at line 53 (service stopped counter).
-        let pm = MockPackageManager { installed: true, service_running: false, ..Default::default() };
+        let pm = MockPackageManager {
+            installed: true,
+            service_running: false,
+            ..Default::default()
+        };
         let deps = vec![Dependency::simple("mysql")]; // mysql is a service
         let issues = print_dep_table(&deps, &pm, false).unwrap();
         assert_eq!(issues, 1, "stopped service must count as one issue");
@@ -65,7 +72,11 @@ mod tests {
 
     #[test]
     fn print_dep_table_running_service_does_not_add_issues() {
-        let pm = MockPackageManager { installed: true, service_running: true, ..Default::default() };
+        let pm = MockPackageManager {
+            installed: true,
+            service_running: true,
+            ..Default::default()
+        };
         let deps = vec![Dependency::simple("mysql")];
         let issues = print_dep_table(&deps, &pm, false).unwrap();
         assert_eq!(issues, 0, "running service must not add to issues");
@@ -78,7 +89,10 @@ mod tests {
         let pm = MockPackageManager::default(); // installed=false, service_running=false
         let deps = vec![Dependency::simple("mysql")];
         let issues = print_dep_table(&deps, &pm, false).unwrap();
-        assert_eq!(issues, 1, "uninstalled service should count as exactly 1 issue");
+        assert_eq!(
+            issues, 1,
+            "uninstalled service should count as exactly 1 issue"
+        );
     }
 
     #[test]
@@ -95,7 +109,10 @@ mod tests {
         env.insert("FOO".to_string(), "bar".to_string());
         env.insert("BAZ".to_string(), "qux".to_string());
         let issues = print_env_table(&env, true).unwrap();
-        assert_eq!(issues, 2, "issues must equal env count when shadowenv file is missing");
+        assert_eq!(
+            issues, 2,
+            "issues must equal env count when shadowenv file is missing"
+        );
     }
 
     #[test]
@@ -115,8 +132,10 @@ mod tests {
         // true mode reports issues; false mode reports 0 (status mode).
         let check_issues = print_env_table(&env, true).unwrap();
         let status_issues = print_env_table(&env, false).unwrap();
-        assert!(check_issues >= status_issues,
-            "check mode issues ({check_issues}) must be >= status mode issues ({status_issues})");
+        assert!(
+            check_issues >= status_issues,
+            "check mode issues ({check_issues}) must be >= status mode issues ({status_issues})"
+        );
     }
 }
 
@@ -186,10 +205,7 @@ pub fn print_dep_table(
 ///
 /// When `bold_errors = true` (check command): shows ✓/✗ icons with "configured"/"missing" labels.
 /// When `bold_errors = false` (status command): shows each key with its current value.
-pub fn print_env_table(
-    config_env: &HashMap<String, String>,
-    bold_errors: bool,
-) -> Result<usize> {
+pub fn print_env_table(config_env: &HashMap<String, String>, bold_errors: bool) -> Result<usize> {
     let mut issues = 0usize;
     let written = shadowenv::read_vars(Path::new(shadowenv::ENV_FILE));
     let key_col = config_env.keys().map(|k| k.len()).max().unwrap_or(0);

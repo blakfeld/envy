@@ -39,7 +39,10 @@ mod tests {
 
     #[test]
     fn node_is_installed_delegates_to_pm() {
-        let pm = MockPackageManager { installed: true, ..Default::default() };
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
         let dep = Dependency::simple("node");
         assert!(NodeModule.is_installed(&pm, &dep).unwrap());
 
@@ -56,7 +59,14 @@ mod tests {
 
     #[test]
     fn node_install_propagates_pm_error() {
-        let pm = MockPackageManager { install_fails: true, ..Default::default() };
-        assert!(NodeModule.install(&pm, &Dependency::simple("node")).is_err());
+        let pm = MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            NodeModule
+                .install(&pm, &Dependency::simple("node"))
+                .is_err()
+        );
     }
 }

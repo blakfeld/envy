@@ -70,38 +70,68 @@ mod tests {
 
     #[test]
     fn apt_package_name_includes_major_version() {
-        let pm = crate::package_manager::MockPackageManager { name: "apt", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "apt",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm, &dep_with_version("8")), "dotnet-sdk-8.0");
         assert_eq!(package_name(&pm, &dep_with_version("6")), "dotnet-sdk-6.0");
     }
 
     #[test]
     fn winget_package_name_includes_major_version() {
-        let pm = crate::package_manager::MockPackageManager { name: "winget", ..Default::default() };
-        assert_eq!(package_name(&pm, &dep_with_version("8")), "Microsoft.DotNet.SDK.8");
+        let pm = crate::package_manager::MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
+        assert_eq!(
+            package_name(&pm, &dep_with_version("8")),
+            "Microsoft.DotNet.SDK.8"
+        );
     }
 
     #[test]
     fn brew_package_name_is_dotnet() {
-        let pm = crate::package_manager::MockPackageManager { name: "brew", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm, &dep_with_version("9")), "dotnet");
     }
 
     #[test]
     fn is_installed_true() {
-        let pm = crate::package_manager::MockPackageManager { installed: true, ..Default::default() };
-        assert!(DotnetModule.is_installed(&pm, &Dependency::simple("dotnet")).unwrap());
+        let pm = crate::package_manager::MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        assert!(
+            DotnetModule
+                .is_installed(&pm, &Dependency::simple("dotnet"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_installed_false() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(!DotnetModule.is_installed(&pm, &Dependency::simple("dotnet")).unwrap());
+        assert!(
+            !DotnetModule
+                .is_installed(&pm, &Dependency::simple("dotnet"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn install_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { install_fails: true, ..Default::default() };
-        assert!(DotnetModule.install(&pm, &Dependency::simple("dotnet")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            DotnetModule
+                .install(&pm, &Dependency::simple("dotnet"))
+                .is_err()
+        );
     }
 }

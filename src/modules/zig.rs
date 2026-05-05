@@ -38,31 +38,51 @@ mod tests {
 
     #[test]
     fn package_name_winget() {
-        let pm = MockPackageManager { name: "winget", ..Default::default() };
+        let pm = MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "zig-lang.zig");
     }
 
     #[test]
     fn package_name_brew_default() {
-        let pm = MockPackageManager { name: "brew", ..Default::default() };
+        let pm = MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "zig");
     }
 
     #[test]
     fn is_installed_true() {
-        let pm = MockPackageManager { installed: true, ..Default::default() };
-        assert!(ZigModule.is_installed(&pm, &Dependency::simple("zig")).unwrap());
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        assert!(
+            ZigModule
+                .is_installed(&pm, &Dependency::simple("zig"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_installed_false() {
         let pm = MockPackageManager::default();
-        assert!(!ZigModule.is_installed(&pm, &Dependency::simple("zig")).unwrap());
+        assert!(
+            !ZigModule
+                .is_installed(&pm, &Dependency::simple("zig"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn install_propagates_pm_error() {
-        let pm = MockPackageManager { install_fails: true, ..Default::default() };
+        let pm = MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
         assert!(ZigModule.install(&pm, &Dependency::simple("zig")).is_err());
     }
 }

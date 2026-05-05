@@ -236,14 +236,24 @@ mod tests {
 
     #[test]
     fn shadowenv_is_available_true_when_installed() {
-        if which("shadowenv").is_err() { return; }
-        assert!(Shadowenv::new().is_available(), "must be true when shadowenv is on PATH");
+        if which("shadowenv").is_err() {
+            return;
+        }
+        assert!(
+            Shadowenv::new().is_available(),
+            "must be true when shadowenv is on PATH"
+        );
     }
 
     #[test]
     fn shadowenv_is_available_false_when_not_installed() {
-        if which("shadowenv").is_ok() { return; }
-        assert!(!Shadowenv::new().is_available(), "must be false when shadowenv is absent");
+        if which("shadowenv").is_ok() {
+            return;
+        }
+        assert!(
+            !Shadowenv::new().is_available(),
+            "must be false when shadowenv is absent"
+        );
     }
 
     // ── Shadowenv::trust / setup ───────────────────────────────────────────────
@@ -266,13 +276,18 @@ mod tests {
     fn shadowenv_setup_fails_when_shadowenv_not_installed() {
         // When shadowenv binary is absent, trust() must fail, and setup() propagates that.
         // This kills `replace setup -> Ok(())` and `replace trust -> Ok(())`.
-        if which("shadowenv").is_ok() { return; }
+        if which("shadowenv").is_ok() {
+            return;
+        }
         let dir = tmp_dir();
         let shadowenv = Shadowenv::new();
         let mut vars = HashMap::new();
         vars.insert("KEY".into(), "val".into());
         let result = shadowenv.setup(&dir, &vars);
-        assert!(result.is_err(), "setup must fail when shadowenv binary is absent");
+        assert!(
+            result.is_err(),
+            "setup must fail when shadowenv binary is absent"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -280,13 +295,18 @@ mod tests {
     fn shadowenv_setup_succeeds_when_shadowenv_installed() {
         // When shadowenv IS installed, setup() must succeed (trust runs without bail).
         // This kills `delete ! in trust` — mutation bails on success, making this Err.
-        if which("shadowenv").is_err() { return; }
+        if which("shadowenv").is_err() {
+            return;
+        }
         let dir = tmp_dir();
         let shadowenv = Shadowenv::new();
         let mut vars = HashMap::new();
         vars.insert("KEY".into(), "val".into());
         let result = shadowenv.setup(&dir, &vars);
-        assert!(result.is_ok(), "setup must succeed when shadowenv is installed");
+        assert!(
+            result.is_ok(),
+            "setup must succeed when shadowenv is installed"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

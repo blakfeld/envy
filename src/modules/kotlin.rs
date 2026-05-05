@@ -36,37 +36,64 @@ mod tests {
 
     #[test]
     fn package_name_brew_default() {
-        let pm = MockPackageManager { name: "brew", ..Default::default() };
+        let pm = MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "kotlin");
     }
 
     #[test]
     fn package_name_apt_default() {
-        let pm = MockPackageManager { name: "apt", ..Default::default() };
+        let pm = MockPackageManager {
+            name: "apt",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "kotlin");
     }
 
     #[test]
     fn package_name_winget() {
-        let pm = MockPackageManager { name: "winget", ..Default::default() };
+        let pm = MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "JetBrains.Kotlin");
     }
 
     #[test]
     fn is_installed_true() {
-        let pm = MockPackageManager { installed: true, ..Default::default() };
-        assert!(KotlinModule.is_installed(&pm, &Dependency::simple("kotlin")).unwrap());
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        assert!(
+            KotlinModule
+                .is_installed(&pm, &Dependency::simple("kotlin"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_installed_false() {
         let pm = MockPackageManager::default();
-        assert!(!KotlinModule.is_installed(&pm, &Dependency::simple("kotlin")).unwrap());
+        assert!(
+            !KotlinModule
+                .is_installed(&pm, &Dependency::simple("kotlin"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn install_propagates_pm_error() {
-        let pm = MockPackageManager { install_fails: true, ..Default::default() };
-        assert!(KotlinModule.install(&pm, &Dependency::simple("kotlin")).is_err());
+        let pm = MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            KotlinModule
+                .install(&pm, &Dependency::simple("kotlin"))
+                .is_err()
+        );
     }
 }

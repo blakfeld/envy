@@ -68,7 +68,9 @@ impl Module for MinioModule {
             vars.insert("MINIO_ROOT_PASSWORD".into(), secret.to_string());
         }
         if !vars.is_empty() {
-            output::warn("minio credentials written to plaintext shadowenv — consider using ejson secrets instead");
+            output::warn(
+                "minio credentials written to plaintext shadowenv — consider using ejson secrets instead",
+            );
         }
         vars
     }
@@ -128,50 +130,91 @@ mod tests {
         );
         let dep = Dependency::with_extra("minio", extra);
         let vars = MinioModule.env_vars(&dep);
-        assert_eq!(vars.get("MINIO_ROOT_USER").map(|s| s.as_str()), Some("myuser"));
-        assert_eq!(vars.get("MINIO_ROOT_PASSWORD").map(|s| s.as_str()), Some("mypassword"));
+        assert_eq!(
+            vars.get("MINIO_ROOT_USER").map(|s| s.as_str()),
+            Some("myuser")
+        );
+        assert_eq!(
+            vars.get("MINIO_ROOT_PASSWORD").map(|s| s.as_str()),
+            Some("mypassword")
+        );
     }
 
     #[test]
     fn package_name_winget() {
-        let pm = crate::package_manager::MockPackageManager { name: "winget", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "MinIO.MinIO");
     }
 
     #[test]
     fn package_name_brew_default() {
-        let pm = crate::package_manager::MockPackageManager { name: "brew", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "minio");
     }
 
     #[test]
     fn is_installed_true() {
-        let pm = crate::package_manager::MockPackageManager { installed: true, ..Default::default() };
-        assert!(MinioModule.is_installed(&pm, &Dependency::simple("minio")).unwrap());
+        let pm = crate::package_manager::MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        assert!(
+            MinioModule
+                .is_installed(&pm, &Dependency::simple("minio"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_installed_false() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(!MinioModule.is_installed(&pm, &Dependency::simple("minio")).unwrap());
+        assert!(
+            !MinioModule
+                .is_installed(&pm, &Dependency::simple("minio"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn install_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { install_fails: true, ..Default::default() };
-        assert!(MinioModule.install(&pm, &Dependency::simple("minio")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            MinioModule
+                .install(&pm, &Dependency::simple("minio"))
+                .is_err()
+        );
     }
 
     #[test]
     fn is_running_true() {
-        let pm = crate::package_manager::MockPackageManager { service_running: true, ..Default::default() };
-        assert!(MinioModule.is_running(&pm, &Dependency::simple("minio")).unwrap());
+        let pm = crate::package_manager::MockPackageManager {
+            service_running: true,
+            ..Default::default()
+        };
+        assert!(
+            MinioModule
+                .is_running(&pm, &Dependency::simple("minio"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_running_false() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(!MinioModule.is_running(&pm, &Dependency::simple("minio")).unwrap());
+        assert!(
+            !MinioModule
+                .is_running(&pm, &Dependency::simple("minio"))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -182,8 +225,15 @@ mod tests {
 
     #[test]
     fn start_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { start_service_fails: true, ..Default::default() };
-        assert!(MinioModule.start(&pm, &Dependency::simple("minio")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            start_service_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            MinioModule
+                .start(&pm, &Dependency::simple("minio"))
+                .is_err()
+        );
     }
 
     #[test]
@@ -194,7 +244,10 @@ mod tests {
 
     #[test]
     fn stop_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { stop_service_fails: true, ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            stop_service_fails: true,
+            ..Default::default()
+        };
         assert!(MinioModule.stop(&pm, &Dependency::simple("minio")).is_err());
     }
 
@@ -208,11 +261,20 @@ mod tests {
     #[test]
     fn env_vars_non_empty_returns_non_empty() {
         let mut extra = HashMap::new();
-        extra.insert("access_key".into(), serde_yaml::Value::String("user".into()));
-        extra.insert("secret_key".into(), serde_yaml::Value::String("pass".into()));
+        extra.insert(
+            "access_key".into(),
+            serde_yaml::Value::String("user".into()),
+        );
+        extra.insert(
+            "secret_key".into(),
+            serde_yaml::Value::String("pass".into()),
+        );
         let dep = Dependency::with_extra("minio", extra);
         let vars = MinioModule.env_vars(&dep);
-        assert!(!vars.is_empty(), "Expected non-empty vars when credentials are configured");
+        assert!(
+            !vars.is_empty(),
+            "Expected non-empty vars when credentials are configured"
+        );
     }
 
     #[test]
@@ -228,13 +290,19 @@ mod tests {
         let dep_with = Dependency::with_extra("minio", extra);
         let _ = MinioModule.env_vars(&dep_with);
         let after_with = WARN_CALL_COUNT.load(Ordering::Relaxed);
-        assert!(after_with > before_with, "warn must be called when credentials are configured");
+        assert!(
+            after_with > before_with,
+            "warn must be called when credentials are configured"
+        );
 
         // Without credentials: warn should NOT be called.
         let before_without = WARN_CALL_COUNT.load(Ordering::Relaxed);
         let dep_without = Dependency::simple("minio");
         let _ = MinioModule.env_vars(&dep_without);
         let after_without = WARN_CALL_COUNT.load(Ordering::Relaxed);
-        assert_eq!(before_without, after_without, "warn must not be called for empty credentials");
+        assert_eq!(
+            before_without, after_without,
+            "warn must not be called for empty credentials"
+        );
     }
 }

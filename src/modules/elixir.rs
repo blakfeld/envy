@@ -46,26 +46,43 @@ mod tests {
 
     #[test]
     fn package_name_winget() {
-        let pm = MockPackageManager { name: "winget", ..Default::default() };
+        let pm = MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "Erlang-Solutions.Elixir");
     }
 
     #[test]
     fn package_name_brew_default() {
-        let pm = MockPackageManager { name: "brew", ..Default::default() };
+        let pm = MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "elixir");
     }
 
     #[test]
     fn is_installed_true() {
-        let pm = MockPackageManager { installed: true, ..Default::default() };
-        assert!(ElixirModule.is_installed(&pm, &Dependency::simple("elixir")).unwrap());
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        assert!(
+            ElixirModule
+                .is_installed(&pm, &Dependency::simple("elixir"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_installed_false() {
         let pm = MockPackageManager::default();
-        assert!(!ElixirModule.is_installed(&pm, &Dependency::simple("elixir")).unwrap());
+        assert!(
+            !ElixirModule
+                .is_installed(&pm, &Dependency::simple("elixir"))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -78,21 +95,31 @@ mod tests {
     #[test]
     fn install_skips_erlang_when_already_installed() {
         // With installed=true, erlang is already present — install should not try to install it.
-        let pm = MockPackageManager { installed: true, ..Default::default() };
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
         let dep = Dependency::simple("elixir");
         assert!(ElixirModule.install(&pm, &dep).is_ok());
     }
 
     #[test]
     fn install_propagates_pm_error() {
-        let pm = MockPackageManager { install_fails: true, ..Default::default() };
+        let pm = MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
         let dep = Dependency::simple("elixir");
         assert!(ElixirModule.install(&pm, &dep).is_err());
     }
 
     #[test]
     fn install_propagates_erlang_pm_error_when_not_installed() {
-        let pm = MockPackageManager { installed: false, install_fails: true, ..Default::default() };
+        let pm = MockPackageManager {
+            installed: false,
+            install_fails: true,
+            ..Default::default()
+        };
         let dep = Dependency::simple("elixir");
         assert!(ElixirModule.install(&pm, &dep).is_err());
     }
@@ -104,8 +131,13 @@ mod tests {
         // Only elixir's install_package call happens → install_count = 1.
         // With mutant (delete !): erlang IS installed → condition true → install erlang too →
         // install_count = 2.
-        let pm = MockPackageManager { installed: true, ..Default::default() };
-        ElixirModule.install(&pm, &Dependency::simple("elixir")).unwrap();
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        ElixirModule
+            .install(&pm, &Dependency::simple("elixir"))
+            .unwrap();
         assert_eq!(
             pm.installed_packages.borrow().len(),
             1,
@@ -116,9 +148,18 @@ mod tests {
 
     #[test]
     fn install_installs_erlang_then_elixir_when_neither_present() {
-        let pm = MockPackageManager { installed: false, ..Default::default() };
-        ElixirModule.install(&pm, &Dependency::simple("elixir")).unwrap();
+        let pm = MockPackageManager {
+            installed: false,
+            ..Default::default()
+        };
+        ElixirModule
+            .install(&pm, &Dependency::simple("elixir"))
+            .unwrap();
         let pkgs = pm.installed_packages.borrow();
-        assert_eq!(pkgs.len(), 2, "Expected erlang + elixir to be installed, got: {pkgs:?}");
+        assert_eq!(
+            pkgs.len(),
+            2,
+            "Expected erlang + elixir to be installed, got: {pkgs:?}"
+        );
     }
 }

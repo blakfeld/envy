@@ -118,67 +118,124 @@ mod tests {
 
     #[test]
     fn package_name_winget() {
-        let pm = crate::package_manager::MockPackageManager { name: "winget", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "MailHog.MailHog");
     }
 
     #[test]
     fn package_name_brew_default() {
-        let pm = crate::package_manager::MockPackageManager { name: "brew", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "mailhog");
     }
 
     #[test]
     fn is_installed_true() {
-        let pm = crate::package_manager::MockPackageManager { installed: true, ..Default::default() };
-        assert!(MailhogModule.is_installed(&pm, &Dependency::simple("mailhog")).unwrap());
+        let pm = crate::package_manager::MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        assert!(
+            MailhogModule
+                .is_installed(&pm, &Dependency::simple("mailhog"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_installed_false() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(!MailhogModule.is_installed(&pm, &Dependency::simple("mailhog")).unwrap());
+        assert!(
+            !MailhogModule
+                .is_installed(&pm, &Dependency::simple("mailhog"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn install_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { install_fails: true, ..Default::default() };
-        assert!(MailhogModule.install(&pm, &Dependency::simple("mailhog")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            MailhogModule
+                .install(&pm, &Dependency::simple("mailhog"))
+                .is_err()
+        );
     }
 
     #[test]
     fn is_running_true() {
-        let pm = crate::package_manager::MockPackageManager { service_running: true, ..Default::default() };
-        assert!(MailhogModule.is_running(&pm, &Dependency::simple("mailhog")).unwrap());
+        let pm = crate::package_manager::MockPackageManager {
+            service_running: true,
+            ..Default::default()
+        };
+        assert!(
+            MailhogModule
+                .is_running(&pm, &Dependency::simple("mailhog"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_running_false() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(!MailhogModule.is_running(&pm, &Dependency::simple("mailhog")).unwrap());
+        assert!(
+            !MailhogModule
+                .is_running(&pm, &Dependency::simple("mailhog"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn start_delegates_to_pm() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(MailhogModule.start(&pm, &Dependency::simple("mailhog")).is_ok());
+        assert!(
+            MailhogModule
+                .start(&pm, &Dependency::simple("mailhog"))
+                .is_ok()
+        );
     }
 
     #[test]
     fn start_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { start_service_fails: true, ..Default::default() };
-        assert!(MailhogModule.start(&pm, &Dependency::simple("mailhog")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            start_service_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            MailhogModule
+                .start(&pm, &Dependency::simple("mailhog"))
+                .is_err()
+        );
     }
 
     #[test]
     fn stop_delegates_to_pm() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(MailhogModule.stop(&pm, &Dependency::simple("mailhog")).is_ok());
+        assert!(
+            MailhogModule
+                .stop(&pm, &Dependency::simple("mailhog"))
+                .is_ok()
+        );
     }
 
     #[test]
     fn stop_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { stop_service_fails: true, ..Default::default() };
-        assert!(MailhogModule.stop(&pm, &Dependency::simple("mailhog")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            stop_service_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            MailhogModule
+                .stop(&pm, &Dependency::simple("mailhog"))
+                .is_err()
+        );
     }
 }

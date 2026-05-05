@@ -51,10 +51,12 @@ impl Module for PostgresModule {
         if p != 5432 {
             match pm.service_config_dir("postgresql") {
                 Some(config_dir) => write_config(&config_dir, p)?,
-                None => { output::warn(&format!(
-                    "port ignored: {} does not support service config dirs",
-                    pm.name()
-                )); }
+                None => {
+                    output::warn(&format!(
+                        "port ignored: {} does not support service config dirs",
+                        pm.name()
+                    ));
+                }
             }
         }
 
@@ -119,10 +121,7 @@ mod tests {
 
     #[test]
     fn write_config_creates_conf_file() {
-        let dir = std::env::temp_dir().join(format!(
-            "envy_pg_test_{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("envy_pg_test_{}", std::process::id()));
         write_config(&dir, 5433).unwrap();
         let content = std::fs::read_to_string(dir.join("envy.conf")).unwrap();
         assert!(content.contains("port = 5433"));
@@ -131,38 +130,65 @@ mod tests {
 
     #[test]
     fn package_name_apt() {
-        let pm = crate::package_manager::MockPackageManager { name: "apt", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "apt",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "postgresql");
     }
 
     #[test]
     fn package_name_winget() {
-        let pm = crate::package_manager::MockPackageManager { name: "winget", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "PostgreSQL.PostgreSQL");
     }
 
     #[test]
     fn package_name_brew_default() {
-        let pm = crate::package_manager::MockPackageManager { name: "brew", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "postgresql");
     }
 
     #[test]
     fn is_installed_true() {
-        let pm = crate::package_manager::MockPackageManager { installed: true, ..Default::default() };
-        assert!(PostgresModule.is_installed(&pm, &Dependency::simple("postgresql")).unwrap());
+        let pm = crate::package_manager::MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        assert!(
+            PostgresModule
+                .is_installed(&pm, &Dependency::simple("postgresql"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_installed_false() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(!PostgresModule.is_installed(&pm, &Dependency::simple("postgresql")).unwrap());
+        assert!(
+            !PostgresModule
+                .is_installed(&pm, &Dependency::simple("postgresql"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn install_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { install_fails: true, ..Default::default() };
-        assert!(PostgresModule.install(&pm, &Dependency::simple("postgresql")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            PostgresModule
+                .install(&pm, &Dependency::simple("postgresql"))
+                .is_err()
+        );
     }
 
     #[test]
@@ -196,37 +222,70 @@ mod tests {
 
     #[test]
     fn is_running_true() {
-        let pm = crate::package_manager::MockPackageManager { service_running: true, ..Default::default() };
-        assert!(PostgresModule.is_running(&pm, &Dependency::simple("postgresql")).unwrap());
+        let pm = crate::package_manager::MockPackageManager {
+            service_running: true,
+            ..Default::default()
+        };
+        assert!(
+            PostgresModule
+                .is_running(&pm, &Dependency::simple("postgresql"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_running_false() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(!PostgresModule.is_running(&pm, &Dependency::simple("postgresql")).unwrap());
+        assert!(
+            !PostgresModule
+                .is_running(&pm, &Dependency::simple("postgresql"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn start_delegates_to_pm() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(PostgresModule.start(&pm, &Dependency::simple("postgresql")).is_ok());
+        assert!(
+            PostgresModule
+                .start(&pm, &Dependency::simple("postgresql"))
+                .is_ok()
+        );
     }
 
     #[test]
     fn start_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { start_service_fails: true, ..Default::default() };
-        assert!(PostgresModule.start(&pm, &Dependency::simple("postgresql")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            start_service_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            PostgresModule
+                .start(&pm, &Dependency::simple("postgresql"))
+                .is_err()
+        );
     }
 
     #[test]
     fn stop_delegates_to_pm() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(PostgresModule.stop(&pm, &Dependency::simple("postgresql")).is_ok());
+        assert!(
+            PostgresModule
+                .stop(&pm, &Dependency::simple("postgresql"))
+                .is_ok()
+        );
     }
 
     #[test]
     fn stop_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { stop_service_fails: true, ..Default::default() };
-        assert!(PostgresModule.stop(&pm, &Dependency::simple("postgresql")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            stop_service_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            PostgresModule
+                .stop(&pm, &Dependency::simple("postgresql"))
+                .is_err()
+        );
     }
 }

@@ -57,8 +57,12 @@ impl Module for KafkaModule {
         // In KRaft mode (`kraft: true`) ZooKeeper is not used; we skip it.
         // We also skip it if the start call fails — the user may have set up
         // ZooKeeper through another means or may be running a KRaft build.
-        if !kraft_mode(dep) && let Err(e) = pm.start_service("zookeeper") {
-            output::warn(&format!("ZooKeeper failed to start: {e} — Kafka may not start"));
+        if !kraft_mode(dep)
+            && let Err(e) = pm.start_service("zookeeper")
+        {
+            output::warn(&format!(
+                "ZooKeeper failed to start: {e} — Kafka may not start"
+            ));
         }
         pm.start_service(&self.service_name(dep))
     }
@@ -135,44 +139,79 @@ mod tests {
 
     #[test]
     fn package_name_winget() {
-        let pm = crate::package_manager::MockPackageManager { name: "winget", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "Apache.Kafka");
     }
 
     #[test]
     fn package_name_brew_default() {
-        let pm = crate::package_manager::MockPackageManager { name: "brew", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "kafka");
     }
 
     #[test]
     fn is_installed_true() {
-        let pm = crate::package_manager::MockPackageManager { installed: true, ..Default::default() };
-        assert!(KafkaModule.is_installed(&pm, &Dependency::simple("kafka")).unwrap());
+        let pm = crate::package_manager::MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        assert!(
+            KafkaModule
+                .is_installed(&pm, &Dependency::simple("kafka"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_installed_false() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(!KafkaModule.is_installed(&pm, &Dependency::simple("kafka")).unwrap());
+        assert!(
+            !KafkaModule
+                .is_installed(&pm, &Dependency::simple("kafka"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn install_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { install_fails: true, ..Default::default() };
-        assert!(KafkaModule.install(&pm, &Dependency::simple("kafka")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            KafkaModule
+                .install(&pm, &Dependency::simple("kafka"))
+                .is_err()
+        );
     }
 
     #[test]
     fn is_running_true() {
-        let pm = crate::package_manager::MockPackageManager { service_running: true, ..Default::default() };
-        assert!(KafkaModule.is_running(&pm, &Dependency::simple("kafka")).unwrap());
+        let pm = crate::package_manager::MockPackageManager {
+            service_running: true,
+            ..Default::default()
+        };
+        assert!(
+            KafkaModule
+                .is_running(&pm, &Dependency::simple("kafka"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_running_false() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(!KafkaModule.is_running(&pm, &Dependency::simple("kafka")).unwrap());
+        assert!(
+            !KafkaModule
+                .is_running(&pm, &Dependency::simple("kafka"))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -181,7 +220,10 @@ mod tests {
         let dep = dep_with_kraft(true);
         assert!(KafkaModule.start(&pm, &dep).is_ok());
         let started = pm.started_services.borrow();
-        assert!(!started.iter().any(|s| s == "zookeeper"), "zookeeper must not be started in kraft mode");
+        assert!(
+            !started.iter().any(|s| s == "zookeeper"),
+            "zookeeper must not be started in kraft mode"
+        );
     }
 
     #[test]
@@ -190,12 +232,18 @@ mod tests {
         let dep = Dependency::simple("kafka");
         assert!(KafkaModule.start(&pm, &dep).is_ok());
         let started = pm.started_services.borrow();
-        assert!(started.iter().any(|s| s == "zookeeper"), "zookeeper must be started in classic mode");
+        assert!(
+            started.iter().any(|s| s == "zookeeper"),
+            "zookeeper must be started in classic mode"
+        );
     }
 
     #[test]
     fn start_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { start_service_fails: true, ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            start_service_fails: true,
+            ..Default::default()
+        };
         let dep = dep_with_kraft(true);
         assert!(KafkaModule.start(&pm, &dep).is_err());
     }
@@ -206,7 +254,10 @@ mod tests {
         let dep = dep_with_kraft(true);
         assert!(KafkaModule.stop(&pm, &dep).is_ok());
         let stopped = pm.stopped_services.borrow();
-        assert!(!stopped.iter().any(|s| s == "zookeeper"), "zookeeper must not be stopped in kraft mode");
+        assert!(
+            !stopped.iter().any(|s| s == "zookeeper"),
+            "zookeeper must not be stopped in kraft mode"
+        );
     }
 
     #[test]
@@ -215,12 +266,18 @@ mod tests {
         let dep = Dependency::simple("kafka");
         assert!(KafkaModule.stop(&pm, &dep).is_ok());
         let stopped = pm.stopped_services.borrow();
-        assert!(stopped.iter().any(|s| s == "zookeeper"), "zookeeper must be stopped in classic mode");
+        assert!(
+            stopped.iter().any(|s| s == "zookeeper"),
+            "zookeeper must be stopped in classic mode"
+        );
     }
 
     #[test]
     fn stop_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { stop_service_fails: true, ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            stop_service_fails: true,
+            ..Default::default()
+        };
         let dep = dep_with_kraft(true);
         assert!(KafkaModule.stop(&pm, &dep).is_err());
     }

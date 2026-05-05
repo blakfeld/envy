@@ -58,7 +58,10 @@ impl Apt {
             .status()
             .with_context(|| format!("Failed to run: sudo apt-get {}", args.join(" ")))?;
         if !status.success() {
-            bail!("sudo apt-get {} exited with non-zero status", args.join(" "));
+            bail!(
+                "sudo apt-get {} exited with non-zero status",
+                args.join(" ")
+            );
         }
         Ok(())
     }
@@ -140,7 +143,10 @@ impl PackageManager for Apt {
             .args(["-W", "-f=${Version}", &dep.name])
             .output()
             .with_context(|| format!("Failed to query version for {}", dep.name))?;
-        Ok(parse_dpkg_version(output.status.success(), &String::from_utf8_lossy(&output.stdout)))
+        Ok(parse_dpkg_version(
+            output.status.success(),
+            &String::from_utf8_lossy(&output.stdout),
+        ))
     }
 
     fn service_config_dir(&self, service: &str) -> Option<PathBuf> {
@@ -212,7 +218,10 @@ mod tests {
     #[test]
     fn parse_dpkg_version_returns_version_on_success() {
         assert_eq!(parse_dpkg_version(true, "1.2.3"), Some("1.2.3".into()));
-        assert_eq!(parse_dpkg_version(true, "2:20.04+dfsg1-0ubuntu3\n"), Some("2:20.04+dfsg1-0ubuntu3".into()));
+        assert_eq!(
+            parse_dpkg_version(true, "2:20.04+dfsg1-0ubuntu3\n"),
+            Some("2:20.04+dfsg1-0ubuntu3".into())
+        );
     }
 
     // ── service_config_dir ────────────────────────────────────────────────────

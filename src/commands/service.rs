@@ -14,11 +14,7 @@ pub fn list(profile: &str) -> Result<()> {
     list_impl(&config, pm.as_ref(), profile)
 }
 
-pub(crate) fn list_impl(
-    config: &EnvyConfig,
-    pm: &dyn PackageManager,
-    profile: &str,
-) -> Result<()> {
+pub(crate) fn list_impl(config: &EnvyConfig, pm: &dyn PackageManager, profile: &str) -> Result<()> {
     let services: Vec<_> = config
         .normalized_dependencies(profile)
         .into_iter()
@@ -33,9 +29,7 @@ pub(crate) fn list_impl(
     output::header("services");
 
     for dep in &services {
-        let running = modules::get(&dep.name)
-            .is_running(pm, dep)
-            .unwrap_or(false);
+        let running = modules::get(&dep.name).is_running(pm, dep).unwrap_or(false);
         if running {
             println!("  {}  {}", "●".green().bold(), dep.name);
         } else {
@@ -113,11 +107,7 @@ pub(crate) fn restart_impl(dep: &Dependency, pm: &dyn PackageManager) -> Result<
 }
 
 /// Finds the named dependency in config and verifies it is a service.
-pub(crate) fn resolve_dep(
-    config: &EnvyConfig,
-    name: &str,
-    profile: &str,
-) -> Result<Dependency> {
+pub(crate) fn resolve_dep(config: &EnvyConfig, name: &str, profile: &str) -> Result<Dependency> {
     let dep = config
         .normalized_dependencies(profile)
         .into_iter()
@@ -131,10 +121,7 @@ pub(crate) fn resolve_dep(
     Ok(dep)
 }
 
-fn resolve(
-    name: &str,
-    profile: &str,
-) -> Result<(Dependency, Box<dyn PackageManager>)> {
+fn resolve(name: &str, profile: &str) -> Result<(Dependency, Box<dyn PackageManager>)> {
     let config = EnvyConfig::load_default()?;
     let pm = package_manager::detect()?;
     pm.ensure_available()
@@ -153,7 +140,8 @@ mod tests {
     fn make_config(dep_names: &[&str]) -> EnvyConfig {
         EnvyConfig {
             name: Some("test".into()),
-            dependencies: dep_names.iter()
+            dependencies: dep_names
+                .iter()
                 .map(|n| RawDependency::Simple(n.to_string()))
                 .collect(),
             environment: HashMap::new(),
@@ -170,7 +158,10 @@ mod tests {
         // Kills `replace == with !=` — mutation finds the wrong dep.
         let config = make_config(&["mysql", "redis"]);
         let dep = resolve_dep(&config, "mysql", "dev").unwrap();
-        assert_eq!(dep.name, "mysql", "must return the dep matching the given name");
+        assert_eq!(
+            dep.name, "mysql",
+            "must return the dep matching the given name"
+        );
     }
 
     #[test]
@@ -206,7 +197,10 @@ mod tests {
     #[test]
     fn stop_impl_stops_running_service() {
         // Kills `delete ! in stop` — mutation would skip stop when service IS running.
-        let pm = MockPackageManager { service_running: true, ..Default::default() };
+        let pm = MockPackageManager {
+            service_running: true,
+            ..Default::default()
+        };
         let dep = Dependency::simple("mysql");
         stop_impl(&dep, &pm).unwrap();
         assert!(
@@ -224,12 +218,18 @@ mod tests {
             ..Default::default()
         };
         let dep = Dependency::simple("mysql");
-        assert!(stop_impl(&dep, &pm).is_err(), "stop error must be propagated");
+        assert!(
+            stop_impl(&dep, &pm).is_err(),
+            "stop error must be propagated"
+        );
     }
 
     #[test]
     fn stop_impl_skips_when_service_already_stopped() {
-        let pm = MockPackageManager { service_running: false, ..Default::default() };
+        let pm = MockPackageManager {
+            service_running: false,
+            ..Default::default()
+        };
         let dep = Dependency::simple("mysql");
         stop_impl(&dep, &pm).unwrap();
         assert!(
@@ -251,12 +251,18 @@ mod tests {
             ..Default::default()
         };
         let dep = Dependency::simple("mysql");
-        assert!(start_impl(&dep, &pm).is_err(), "start error must be propagated");
+        assert!(
+            start_impl(&dep, &pm).is_err(),
+            "start error must be propagated"
+        );
     }
 
     #[test]
     fn start_impl_skips_when_service_already_running() {
-        let pm = MockPackageManager { service_running: true, ..Default::default() };
+        let pm = MockPackageManager {
+            service_running: true,
+            ..Default::default()
+        };
         let dep = Dependency::simple("mysql");
         // Returns Ok without calling start_service.
         start_impl(&dep, &pm).unwrap();
@@ -275,7 +281,10 @@ mod tests {
             ..Default::default()
         };
         let dep = Dependency::simple("mysql");
-        assert!(restart_impl(&dep, &pm).is_err(), "restart must propagate start error");
+        assert!(
+            restart_impl(&dep, &pm).is_err(),
+            "restart must propagate start error"
+        );
     }
 
     // ── list_impl ─────────────────────────────────────────────────────────────
@@ -290,7 +299,10 @@ mod tests {
     #[test]
     fn list_impl_returns_ok_with_services() {
         let config = make_config(&["mysql"]);
-        let pm = MockPackageManager { service_running: true, ..Default::default() };
+        let pm = MockPackageManager {
+            service_running: true,
+            ..Default::default()
+        };
         assert!(list_impl(&config, &pm, "dev").is_ok());
     }
 }

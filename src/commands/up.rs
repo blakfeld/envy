@@ -149,7 +149,10 @@ pub(crate) fn apply_lock(dep: &Dependency, lock: Option<&LockFile>) -> Dependenc
     dep.clone()
 }
 
-pub(crate) fn install_dep(pm: &dyn package_manager::PackageManager, dep: &Dependency) -> Result<()> {
+pub(crate) fn install_dep(
+    pm: &dyn package_manager::PackageManager,
+    dep: &Dependency,
+) -> Result<()> {
     let module = modules::get(&dep.name);
     let display = dep.versioned_name();
 
@@ -202,7 +205,9 @@ pub(crate) fn write_lock(
             },
         );
     }
-    let lock = LockFile { dependencies: locked };
+    let lock = LockFile {
+        dependencies: locked,
+    };
     lock.write(path).context("Failed to write envy.lock")?;
     output::success(&format!("Lock file written to {}", crate::lock::PATH));
     Ok(())
@@ -233,10 +238,13 @@ mod tests {
         // Kills `delete field version from struct Dependency expression in apply_lock`.
         let dep = Dependency::simple("node");
         let mut deps = HashMap::new();
-        deps.insert("node".into(), LockedDep {
-            resolved_version: Some("20.11.0".into()),
-            source: "homebrew".into(),
-        });
+        deps.insert(
+            "node".into(),
+            LockedDep {
+                resolved_version: Some("20.11.0".into()),
+                source: "homebrew".into(),
+            },
+        );
         let lock = LockFile { dependencies: deps };
         let effective = apply_lock(&dep, Some(&lock));
         assert_eq!(
@@ -251,10 +259,13 @@ mod tests {
         let mut dep = Dependency::simple("node");
         dep.version = Some("18.0.0".into());
         let mut deps = HashMap::new();
-        deps.insert("node".into(), LockedDep {
-            resolved_version: Some("20.11.0".into()),
-            source: "homebrew".into(),
-        });
+        deps.insert(
+            "node".into(),
+            LockedDep {
+                resolved_version: Some("20.11.0".into()),
+                source: "homebrew".into(),
+            },
+        );
         let lock = LockFile { dependencies: deps };
         let effective = apply_lock(&dep, Some(&lock));
         assert_eq!(effective.version.as_deref(), Some("18.0.0"));
@@ -281,7 +292,10 @@ mod tests {
     fn install_dep_propagates_install_error() {
         // Kills `replace install_dep -> Ok(())` — mutation always returns Ok.
         // Use node (non-service) to avoid wait_for_ready TCP check.
-        let pm = MockPackageManager { install_fails: true, ..Default::default() };
+        let pm = MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
         let dep = Dependency::simple("node");
         assert!(
             install_dep(&pm, &dep).is_err(),
@@ -291,7 +305,10 @@ mod tests {
 
     #[test]
     fn install_dep_returns_ok_when_already_installed() {
-        let pm = MockPackageManager { installed: true, ..Default::default() };
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
         let dep = Dependency::simple("node");
         assert!(install_dep(&pm, &dep).is_ok());
     }

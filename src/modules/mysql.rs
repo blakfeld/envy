@@ -50,10 +50,12 @@ impl Module for MysqlModule {
         if p != 3306 || args.is_some() {
             match pm.service_config_dir("mysql") {
                 Some(config_dir) => write_mysql_config(&config_dir, p, args.as_deref())?,
-                None => { output::warn(&format!(
-                    "port/cli_args ignored: {} does not support service config dirs",
-                    pm.name()
-                )); }
+                None => {
+                    output::warn(&format!(
+                        "port/cli_args ignored: {} does not support service config dirs",
+                        pm.name()
+                    ));
+                }
             }
         }
 
@@ -161,38 +163,65 @@ mod tests {
 
     #[test]
     fn package_name_apt() {
-        let pm = crate::package_manager::MockPackageManager { name: "apt", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "apt",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "mysql-server");
     }
 
     #[test]
     fn package_name_winget() {
-        let pm = crate::package_manager::MockPackageManager { name: "winget", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "winget",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "Oracle.MySQL");
     }
 
     #[test]
     fn package_name_brew_default() {
-        let pm = crate::package_manager::MockPackageManager { name: "brew", ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "brew",
+            ..Default::default()
+        };
         assert_eq!(package_name(&pm), "mysql");
     }
 
     #[test]
     fn is_installed_true() {
-        let pm = crate::package_manager::MockPackageManager { installed: true, ..Default::default() };
-        assert!(MysqlModule.is_installed(&pm, &Dependency::simple("mysql")).unwrap());
+        let pm = crate::package_manager::MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        assert!(
+            MysqlModule
+                .is_installed(&pm, &Dependency::simple("mysql"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_installed_false() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(!MysqlModule.is_installed(&pm, &Dependency::simple("mysql")).unwrap());
+        assert!(
+            !MysqlModule
+                .is_installed(&pm, &Dependency::simple("mysql"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn install_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { install_fails: true, ..Default::default() };
-        assert!(MysqlModule.install(&pm, &Dependency::simple("mysql")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            install_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            MysqlModule
+                .install(&pm, &Dependency::simple("mysql"))
+                .is_err()
+        );
     }
 
     #[test]
@@ -222,7 +251,10 @@ mod tests {
             ..Default::default()
         };
         let mut extra = HashMap::new();
-        extra.insert("cli_args".into(), serde_yaml::Value::String("--innodb-buffer-pool-size=256M".into()));
+        extra.insert(
+            "cli_args".into(),
+            serde_yaml::Value::String("--innodb-buffer-pool-size=256M".into()),
+        );
         let dep = dep_with_extra(extra);
         MysqlModule.install(&pm, &dep).unwrap();
         let content = std::fs::read_to_string(dir.join("my.cnf")).unwrap();
@@ -247,14 +279,25 @@ mod tests {
 
     #[test]
     fn is_running_true() {
-        let pm = crate::package_manager::MockPackageManager { service_running: true, ..Default::default() };
-        assert!(MysqlModule.is_running(&pm, &Dependency::simple("mysql")).unwrap());
+        let pm = crate::package_manager::MockPackageManager {
+            service_running: true,
+            ..Default::default()
+        };
+        assert!(
+            MysqlModule
+                .is_running(&pm, &Dependency::simple("mysql"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn is_running_false() {
         let pm = crate::package_manager::MockPackageManager::default();
-        assert!(!MysqlModule.is_running(&pm, &Dependency::simple("mysql")).unwrap());
+        assert!(
+            !MysqlModule
+                .is_running(&pm, &Dependency::simple("mysql"))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -265,8 +308,15 @@ mod tests {
 
     #[test]
     fn start_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { start_service_fails: true, ..Default::default() };
-        assert!(MysqlModule.start(&pm, &Dependency::simple("mysql")).is_err());
+        let pm = crate::package_manager::MockPackageManager {
+            start_service_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            MysqlModule
+                .start(&pm, &Dependency::simple("mysql"))
+                .is_err()
+        );
     }
 
     #[test]
@@ -277,7 +327,10 @@ mod tests {
 
     #[test]
     fn stop_propagates_pm_error() {
-        let pm = crate::package_manager::MockPackageManager { stop_service_fails: true, ..Default::default() };
+        let pm = crate::package_manager::MockPackageManager {
+            stop_service_fails: true,
+            ..Default::default()
+        };
         assert!(MysqlModule.stop(&pm, &Dependency::simple("mysql")).is_err());
     }
 }
