@@ -1,6 +1,6 @@
-# envy
+# devy
 
-A declarative developer environment manager. Define your project's dependencies, services, environment variables, and runnable commands in a single `envy.yml` file — then run `envy up` to get everything running.
+A declarative developer environment manager. Define your project's dependencies, services, environment variables, and runnable commands in a single `devy.yml` file — then run `devy up` to get everything running.
 
 ## What it does
 
@@ -8,8 +8,8 @@ A declarative developer environment manager. Define your project's dependencies,
 - **Starts services** like MySQL and Redis, and waits for them to be healthy
 - **Sets environment variables** persistently in your shell session via [shadowenv](https://shopify.github.io/shadowenv/)
 - **Decrypts secrets** from [ejson](https://github.com/Shopify/ejson) files and merges them into the environment
-- **Locks versions** in `envy.lock` so teammates get the same setup
-- **Runs project commands** defined in `envy.yml` (like `npm run dev`, `make test`, etc.)
+- **Locks versions** in `devy.lock` so teammates get the same setup
+- **Runs project commands** defined in `devy.yml` (like `npm run dev`, `make test`, etc.)
 
 ## Platform support
 
@@ -27,20 +27,20 @@ A declarative developer environment manager. Define your project's dependencies,
 ## Installation
 
 ```sh
-cargo install --path .
+cargo install devy
 ```
 
-Add the shell hook to your rc file. It activates the environment after `envy up` **and** enables tab-completion for all built-in subcommands and your project's custom commands:
+Add the shell hook to your rc file. It activates the environment after `devy up` **and** enables tab-completion for all built-in subcommands and your project's custom commands:
 
 ```sh
 # ~/.zshrc
-eval "$(envy hook zsh)"
+eval "$(devy hook zsh)"
 
 # ~/.bashrc
-eval "$(envy hook bash)"
+eval "$(devy hook bash)"
 
 # ~/.config/fish/config.fish
-envy hook fish | source
+devy hook fish | source
 ```
 
 ## Quick start
@@ -48,16 +48,16 @@ envy hook fish | source
 Create a starter config:
 
 ```sh
-envy init
+devy init
 ```
 
-Then edit `envy.yml` to add your dependencies, and bring the environment up:
+Then edit `devy.yml` to add your dependencies, and bring the environment up:
 
 ```sh
-envy up
+devy up
 ```
 
-## envy.yml reference
+## devy.yml reference
 
 ```yaml
 name: my-project
@@ -136,80 +136,80 @@ hooks:
 
 ## Commands
 
-### `envy up`
+### `devy up`
 
 Installs dependencies, starts services, and configures the environment.
 
 ```sh
-envy up                   # Use the dev profile (default)
-envy up --profile staging # Use a named profile
-envy up --update          # Re-resolve all versions and rewrite envy.lock
-envy up --dry-run         # Check status without making any changes
+devy up                   # Use the dev profile (default)
+devy up --profile staging # Use a named profile
+devy up --update          # Re-resolve all versions and rewrite devy.lock
+devy up --dry-run         # Check status without making any changes
 ```
 
-### `envy down`
+### `devy down`
 
 Stops all managed services.
 
 ```sh
-envy down
-envy down --profile staging
+devy down
+devy down --profile staging
 ```
 
-### `envy status`
+### `devy status`
 
 Shows what is installed, what services are running, and what environment variables are set.
 
 ```sh
-envy status
+devy status
 ```
 
-### `envy check`
+### `devy check`
 
-Validates that everything matches `envy.yml` and exits non-zero if any issues are found. Suitable for CI.
+Validates that everything matches `devy.yml` and exits non-zero if any issues are found. Suitable for CI.
 
 ```sh
-envy check
+devy check
 ```
 
-### `envy init`
+### `devy init`
 
-Creates an empty `envy.yml` in the current directory.
+Creates an empty `devy.yml` in the current directory.
 
 ```sh
-envy init          # Fails if envy.yml already exists
-envy init --force  # Overwrite an existing envy.yml
+devy init          # Fails if devy.yml already exists
+devy init --force  # Overwrite an existing devy.yml
 ```
 
-### `envy <command>`
+### `devy <command>`
 
-Runs a command defined under `commands:` in `envy.yml`.
+Runs a command defined under `commands:` in `devy.yml`.
 
 ```sh
-envy dev      # Runs the "dev" command
-envy migrate  # Runs the "migrate" command
+devy dev      # Runs the "dev" command
+devy migrate  # Runs the "migrate" command
 ```
 
-The active profile is read from the `ENVY_PROFILE` environment variable (defaults to `dev`), so profile-restricted commands are correctly filtered.
+The active profile is read from the `DEVY_PROFILE` environment variable (defaults to `dev`), so profile-restricted commands are correctly filtered.
 
-### `envy hook <shell>`
+### `devy hook <shell>`
 
 Prints a shell integration snippet. Pipe it to `eval` in your rc file (see [Installation](#installation)).
 
 ```sh
-envy hook zsh
-envy hook bash
-envy hook fish
+devy hook zsh
+devy hook bash
+devy hook fish
 ```
 
 The snippet does two things:
 
-1. **Shadowenv activation** — wraps `envy up` so the new environment is activated in your current shell session immediately after installation.
-2. **Tab completion** — registers completion for all built-in subcommands (`up`, `down`, `status`, `check`, `init`, `hook`) and flags. Commands you define under `commands:` in `envy.yml` are completed **dynamically** — the completion function calls `envy _commands` at tab-press time so new commands appear without reloading your shell.
+1. **Shadowenv activation** — wraps `devy up` so the new environment is activated in your current shell session immediately after installation.
+2. **Tab completion** — registers completion for all built-in subcommands (`up`, `down`, `status`, `check`, `init`, `hook`) and flags. Commands you define under `commands:` in `devy.yml` are completed **dynamically** — the completion function calls `devy _commands` at tab-press time so new commands appear without reloading your shell.
 
 ## Profiles
 
-Profiles let you vary which dependencies and commands are active per environment. The default profile is `dev`. Pass `--profile <name>` to any command, or set `ENVY_PROFILE` for commands run via `envy <command>`.
+Profiles let you vary which dependencies and commands are active per environment. The default profile is `dev`. Pass `--profile <name>` to any command, or set `DEVY_PROFILE` for commands run via `devy <command>`.
 
 ```yaml
 dependencies:
@@ -227,7 +227,7 @@ commands:
 
 ## Secrets with ejson
 
-Secrets are stored encrypted in an ejson file and decrypted at `envy up` time. Values are merged into the environment after plain `environment:` variables, so secrets win on conflict. Secret values are never printed to the terminal.
+Secrets are stored encrypted in an ejson file and decrypted at `devy up` time. Values are merged into the environment after plain `environment:` variables, so secrets win on conflict. Secret values are never printed to the terminal.
 
 ```sh
 # Generate a keypair
@@ -238,7 +238,7 @@ ejson keygen
 ```
 
 ```yaml
-# envy.yml
+# devy.yml
 secrets: secrets.ejson
 ```
 
@@ -253,9 +253,9 @@ secrets: secrets.ejson
 
 ## Lock file
 
-`envy up` writes `envy.lock` recording the exact version of every dependency that was installed. On subsequent runs without `--update`, envy pins each versionless dependency to its locked version so the environment is reproducible across machines.
+`devy up` writes `devy.lock` recording the exact version of every dependency that was installed. On subsequent runs without `--update`, devy pins each versionless dependency to its locked version so the environment is reproducible across machines.
 
-Commit `envy.lock` to version control. Run `envy up --update` when you want to upgrade.
+Commit `devy.lock` to version control. Run `devy up --update` when you want to upgrade.
 
 ## Supported dependency modules
 
@@ -289,7 +289,7 @@ Commit `envy.lock` to version control. Run `envy up --update` when you want to u
 
 ### Platform package name mapping
 
-Each module knows the correct package name for each platform — you always use the same name in `envy.yml` regardless of OS:
+Each module knows the correct package name for each platform — you always use the same name in `devy.yml` regardless of OS:
 
 | Module | Homebrew | apt | WinGet |
 |---|---|---|---|
@@ -307,6 +307,6 @@ Each module knows the correct package name for each platform — you always use 
 
 ### Platform notes
 
-**Ubuntu/Debian:** Install operations use `sudo apt-get`. Version pinning with the `version:` field uses apt's exact-version syntax (`pkg=version`) — for most languages, omit the version field and rely on `envy.lock` to pin the installed version across machines.
+**Ubuntu/Debian:** Install operations use `sudo apt-get`. Version pinning with the `version:` field uses apt's exact-version syntax (`pkg=version`) — for most languages, omit the version field and rely on `devy.lock` to pin the installed version across machines.
 
 **Windows:** Service management uses `net start`/`sc`. Custom MySQL/PostgreSQL config options (`port`, `cli_args`) are not applied on Windows.

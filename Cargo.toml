@@ -1,10 +1,14 @@
 [package]
-name = "envy"
+name = "devy"
 version = "0.1.0"
 edition = "2024"
+description = "A developer environment manager — install dependencies and configure env vars from a single devy.yml"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/blakfeld/envy"
 
 [[bin]]
-name = "envy"
+name = "devy"
 path = "src/main.rs"
 
 [dependencies]
