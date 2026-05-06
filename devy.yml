@@ -1,10 +1,6 @@
-name: envy
-
 dependencies:
   - rust:
       toolchain: stable
-
-environment: {}
 
 commands:
   build: cargo build
@@ -13,4 +9,3 @@ commands:
   fmt: cargo fmt
   fmt-check:
     cmd: cargo fmt --check
-    profiles: [ci]
