@@ -43,8 +43,7 @@ pub fn run(name: &str) -> Result<()> {
     let cmd = match raw {
         Some(raw) => EnvyCommand::from(raw),
         None => {
-            let mut available: Vec<&str> =
-                config.commands.keys().map(|k| k.as_str()).collect();
+            let mut available: Vec<&str> = config.commands.keys().map(|k| k.as_str()).collect();
             available.sort_unstable();
             if available.is_empty() {
                 bail!("Unknown command '{}'. No commands are defined.", name);

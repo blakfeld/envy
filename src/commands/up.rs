@@ -137,7 +137,10 @@ pub(crate) fn install_dep(
         output::success(&format!("Installed {}", display));
 
         if let Some(cmd) = &dep.after_install {
-            run_hook("after_install", &HookAction::Single(RawCommand::Simple(cmd.clone())))?;
+            run_hook(
+                "after_install",
+                &HookAction::Single(RawCommand::Simple(cmd.clone())),
+            )?;
         }
     }
 

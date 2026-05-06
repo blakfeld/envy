@@ -9,10 +9,7 @@ use crate::package_manager::PackageManager;
 
 use super::shared;
 
-pub(crate) fn check_impl(
-    config: &EnvyConfig,
-    pm: &dyn PackageManager,
-) -> Result<()> {
+pub(crate) fn check_impl(config: &EnvyConfig, pm: &dyn PackageManager) -> Result<()> {
     let project_name = config.name.as_deref().unwrap_or("project");
     output::header(&format!("devy check · {}", project_name));
 
