@@ -93,7 +93,6 @@ mod tests {
             name: "elasticsearch".into(),
             version: None,
             tap: None,
-            profiles: None,
             after_install: None,
             extra,
         }

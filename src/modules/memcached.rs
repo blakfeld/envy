@@ -69,7 +69,6 @@ mod tests {
             name: "memcached".into(),
             version: None,
             tap: None,
-            profiles: None,
             after_install: None,
             extra,
         }

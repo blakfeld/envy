@@ -311,7 +311,6 @@ pub(super) fn pm_dep(dep: &Dependency, name: &str) -> Dependency {
         name: name.to_string(),
         version: dep.version.clone(),
         tap: dep.tap.clone(),
-        profiles: dep.profiles.clone(),
         after_install: dep.after_install.clone(),
         extra: dep.extra.clone(),
     }
@@ -837,7 +836,6 @@ mod tests {
             name: "node".into(),
             version: None,
             tap: None,
-            profiles: None,
             after_install: None,
             extra,
         };
@@ -856,7 +854,6 @@ mod tests {
             name: "node".into(),
             version: None,
             tap: None,
-            profiles: None,
             after_install: None,
             extra,
         };
@@ -871,7 +868,6 @@ mod tests {
             name: "ruby".into(),
             version: Some("3.2".into()),
             tap: Some("homebrew/core".into()),
-            profiles: Some(vec!["dev".into()]),
             after_install: None,
             extra: HashMap::new(),
         };
@@ -879,7 +875,6 @@ mod tests {
         assert_eq!(remapped.name, "ruby@3.2");
         assert_eq!(remapped.version, Some("3.2".into()));
         assert_eq!(remapped.tap, Some("homebrew/core".into()));
-        assert_eq!(remapped.profiles, Some(vec!["dev".into()]));
     }
 
     // ── Module trait defaults ─────────────────────────────────────────────────

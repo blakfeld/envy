@@ -12,14 +12,13 @@ use super::shared;
 pub(crate) fn check_impl(
     config: &EnvyConfig,
     pm: &dyn PackageManager,
-    profile: &str,
 ) -> Result<()> {
     let project_name = config.name.as_deref().unwrap_or("project");
-    output::header(&format!("devy check · {} [{}]", project_name, profile));
+    output::header(&format!("devy check · {}", project_name));
 
     let mut issues: usize = 0;
 
-    let deps = config.normalized_dependencies(profile);
+    let deps = config.normalized_dependencies();
     if !deps.is_empty() {
         output::header("Dependencies");
         issues += shared::print_dep_table(&deps, pm, true)?;
@@ -46,10 +45,10 @@ fn issue_noun(count: usize) -> &'static str {
     if count == 1 { "issue" } else { "issues" }
 }
 
-pub fn run(profile: &str) -> Result<()> {
+pub fn run() -> Result<()> {
     let config = EnvyConfig::load_default()?;
     let pm = package_manager::detect()?;
-    check_impl(&config, pm.as_ref(), profile)
+    check_impl(&config, pm.as_ref())
 }
 
 #[cfg(test)]
@@ -68,7 +67,7 @@ mod tests {
                 .collect(),
             environment: env,
             commands: HashMap::new(),
-            secrets: None,
+
             hooks: Default::default(),
         }
     }
@@ -80,7 +79,7 @@ mod tests {
             installed: true,
             ..Default::default()
         };
-        assert!(check_impl(&config, &pm, "dev").is_ok());
+        assert!(check_impl(&config, &pm).is_ok());
     }
 
     #[test]
@@ -88,7 +87,7 @@ mod tests {
         // Kills `replace run -> Ok(())` — with that mutation the result would always be Ok.
         let config = make_config(&["node"], HashMap::new());
         let pm = MockPackageManager::default(); // installed=false
-        assert!(check_impl(&config, &pm, "dev").is_err());
+        assert!(check_impl(&config, &pm).is_err());
     }
 
     #[test]
@@ -96,7 +95,7 @@ mod tests {
         // Kills `replace += with -=` mutations in issue counting.
         let config = make_config(&["node", "python"], HashMap::new());
         let pm = MockPackageManager::default();
-        let result = check_impl(&config, &pm, "dev");
+        let result = check_impl(&config, &pm);
         assert!(result.is_err(), "two missing deps must produce errors");
     }
 
@@ -106,7 +105,7 @@ mod tests {
         // No panic/error expected when deps list is empty.
         let config = make_config(&[], HashMap::new());
         let pm = MockPackageManager::default();
-        assert!(check_impl(&config, &pm, "dev").is_ok());
+        assert!(check_impl(&config, &pm).is_ok());
     }
 
     #[test]
@@ -115,7 +114,7 @@ mod tests {
         // (Verified via the side-effect path, but any deterministic Err is sufficient.)
         let config = make_config(&["node"], HashMap::new());
         let pm = MockPackageManager::default();
-        assert!(check_impl(&config, &pm, "dev").is_err());
+        assert!(check_impl(&config, &pm).is_err());
     }
 
     #[test]
@@ -126,7 +125,7 @@ mod tests {
             installed: true,
             ..Default::default()
         };
-        assert!(check_impl(&config, &pm, "dev").is_ok());
+        assert!(check_impl(&config, &pm).is_ok());
     }
 
     #[test]
@@ -135,7 +134,7 @@ mod tests {
         // Kills `delete ! in run at line 26` — mutation would count INSTALLED services as issues.
         let config = make_config(&["mysql"], HashMap::new()); // mysql is a service
         let pm = MockPackageManager::default(); // installed=false
-        let result = check_impl(&config, &pm, "dev");
+        let result = check_impl(&config, &pm);
         assert!(
             result.is_err(),
             "not-installed service must count as an issue"
@@ -153,7 +152,7 @@ mod tests {
         let config = make_config(&[], env);
         let pm = MockPackageManager::default();
         // print_env_table with bold_errors=true and no shadowenv file returns env.len() = 1 issue.
-        let result = check_impl(&config, &pm, "dev");
+        let result = check_impl(&config, &pm);
         assert!(
             result.is_err(),
             "a missing env var must be counted as an issue"
@@ -169,6 +168,6 @@ mod tests {
         env.insert("MY_VAR".to_string(), "val".to_string());
         let config = make_config(&["node"], env);
         let pm = MockPackageManager::default(); // nothing installed, no shadowenv file
-        assert!(check_impl(&config, &pm, "dev").is_err());
+        assert!(check_impl(&config, &pm).is_err());
     }
 }

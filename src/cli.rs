@@ -2,7 +2,6 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use crate::commands;
-use crate::config::DEFAULT_PROFILE;
 
 #[derive(Parser)]
 #[command(
@@ -22,12 +21,9 @@ enum Commands {
         /// Re-resolve all versions and rewrite devy.lock
         #[arg(long)]
         update: bool,
-        /// Validate without making changes (same as `envy check`)
+        /// Validate without making changes (same as `devy check`)
         #[arg(long)]
         dry_run: bool,
-        /// Only install dependencies tagged with this profile
-        #[arg(long, default_value = DEFAULT_PROFILE)]
-        profile: String,
     },
     /// Create an empty devy.yml in the current directory
     Init {
@@ -36,50 +32,28 @@ enum Commands {
         force: bool,
     },
     /// List services from devy.yml and their current running status
-    Services {
-        /// Filter by profile
-        #[arg(long, default_value = DEFAULT_PROFILE)]
-        profile: String,
-    },
+    Services,
     /// Start a named service
     Start {
         /// Service name as defined in devy.yml
         name: String,
-        #[arg(long, default_value = DEFAULT_PROFILE)]
-        profile: String,
     },
     /// Stop a named service
     Stop {
         /// Service name as defined in devy.yml
         name: String,
-        #[arg(long, default_value = DEFAULT_PROFILE)]
-        profile: String,
     },
     /// Restart a named service (stop then start)
     Restart {
         /// Service name as defined in devy.yml
         name: String,
-        #[arg(long, default_value = DEFAULT_PROFILE)]
-        profile: String,
     },
     /// Stop all services defined in devy.yml
-    Down {
-        /// Only stop services tagged with this profile
-        #[arg(long, default_value = DEFAULT_PROFILE)]
-        profile: String,
-    },
+    Down,
     /// Show install, service, and environment status
-    Status {
-        /// Filter by profile
-        #[arg(long, default_value = DEFAULT_PROFILE)]
-        profile: String,
-    },
+    Status,
     /// Validate the environment matches devy.yml without making changes
-    Check {
-        /// Filter by profile
-        #[arg(long, default_value = DEFAULT_PROFILE)]
-        profile: String,
-    },
+    Check,
     /// Print a shell integration snippet to eval in your rc file
     Hook {
         /// Shell to generate the snippet for (zsh, bash, fish)
@@ -100,23 +74,21 @@ impl Cli {
             Commands::Up {
                 update: _,
                 dry_run: true,
-                profile,
-            } => commands::check::run(profile),
+            } => commands::check::run(),
             Commands::Up {
                 update,
                 dry_run: false,
-                profile,
-            } => commands::up::run(*update, profile),
+            } => commands::up::run(*update),
             Commands::Init { force } => {
                 commands::init::run(*force, std::path::Path::new("devy.yml"))
             }
-            Commands::Services { profile } => commands::service::list(profile),
-            Commands::Start { name, profile } => commands::service::start(name, profile),
-            Commands::Stop { name, profile } => commands::service::stop(name, profile),
-            Commands::Restart { name, profile } => commands::service::restart(name, profile),
-            Commands::Down { profile } => commands::down::run(profile),
-            Commands::Status { profile } => commands::status::run(profile),
-            Commands::Check { profile } => commands::check::run(profile),
+            Commands::Services => commands::service::list(),
+            Commands::Start { name } => commands::service::start(name),
+            Commands::Stop { name } => commands::service::stop(name),
+            Commands::Restart { name } => commands::service::restart(name),
+            Commands::Down => commands::down::run(),
+            Commands::Status => commands::status::run(),
+            Commands::Check => commands::check::run(),
             Commands::Hook { shell } => commands::hook::run(shell),
             Commands::ListCommands => {
                 commands::list_commands::run();

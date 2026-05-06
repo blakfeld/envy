@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use std::process::Command;
 
-use crate::config::{DEFAULT_PROFILE, EnvyCommand, EnvyConfig, RawCommand};
+use crate::config::{EnvyCommand, EnvyConfig, HookAction, RawCommand};
 use crate::output;
 
 fn spawn_cmd(cmd: &EnvyCommand, label: &str) -> Result<()> {
@@ -23,12 +23,14 @@ fn spawn_cmd(cmd: &EnvyCommand, label: &str) -> Result<()> {
     Ok(())
 }
 
-/// Runs a single hook by name (e.g. "before_up"). Aborts with an error if it exits non-zero.
-pub fn run_hook(label: &str, raw: &RawCommand) -> Result<()> {
-    let cmd = EnvyCommand::from(raw.clone());
-    output::step(&format!("Running hook '{}'", label));
-    spawn_cmd(&cmd, label)?;
-    output::success(&format!("Hook '{}' succeeded", label));
+/// Runs all commands in a hook. Aborts with an error if any command exits non-zero.
+pub fn run_hook(label: &str, action: &HookAction) -> Result<()> {
+    for raw in action.commands() {
+        let cmd = EnvyCommand::from(raw.clone());
+        output::step(&format!("Running hook '{}'", label));
+        spawn_cmd(&cmd, label)?;
+        output::success(&format!("Hook '{}' succeeded", label));
+    }
     Ok(())
 }
 
@@ -36,35 +38,20 @@ pub fn run_hook(label: &str, raw: &RawCommand) -> Result<()> {
 pub fn run(name: &str) -> Result<()> {
     let config = EnvyConfig::load_default()?;
 
-    // `envy <cmd>` has no --profile flag; fall back to DEVY_PROFILE env var.
-    let profile = std::env::var("DEVY_PROFILE").unwrap_or_else(|_| DEFAULT_PROFILE.to_string());
-
-    let raw = config
-        .commands
-        .get(name)
-        .cloned()
-        .filter(|cmd| cmd.is_active_for(&profile));
+    let raw = config.commands.get(name).cloned();
 
     let cmd = match raw {
         Some(raw) => EnvyCommand::from(raw),
         None => {
-            let available: Vec<&str> = config
-                .commands
-                .iter()
-                .filter(|(_, cmd)| cmd.is_active_for(&profile))
-                .map(|(k, _)| k.as_str())
-                .collect();
+            let mut available: Vec<&str> =
+                config.commands.keys().map(|k| k.as_str()).collect();
+            available.sort_unstable();
             if available.is_empty() {
-                bail!(
-                    "Unknown command '{}'. No commands are defined for profile '{}'.",
-                    name,
-                    profile
-                );
+                bail!("Unknown command '{}'. No commands are defined.", name);
             } else {
                 bail!(
-                    "Unknown command '{}'. Available (profile: {}): {}",
+                    "Unknown command '{}'. Available: {}",
                     name,
-                    profile,
                     available.join(", ")
                 );
             }
@@ -80,30 +67,47 @@ pub fn run(name: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::CommandConfig;
+    use crate::config::{CommandConfig, HookAction};
 
     #[test]
     fn run_hook_with_succeeding_command_returns_ok() {
-        let raw = RawCommand::Simple("true".into());
-        assert!(run_hook("test_hook", &raw).is_ok());
+        let action = HookAction::Single(RawCommand::Simple("true".into()));
+        assert!(run_hook("test_hook", &action).is_ok());
     }
 
     #[test]
     fn run_hook_with_failing_command_returns_err() {
-        let raw = RawCommand::Simple("false".into());
-        let err = run_hook("test_hook", &raw).unwrap_err();
+        let action = HookAction::Single(RawCommand::Simple("false".into()));
+        let err = run_hook("test_hook", &action).unwrap_err();
         assert!(err.to_string().contains("test_hook"));
     }
 
     #[test]
     fn run_hook_with_custom_shell_uses_that_shell() {
-        let raw = RawCommand::Configured(CommandConfig {
+        let action = HookAction::Single(RawCommand::Configured(CommandConfig {
             cmd: "true".into(),
             cwd: None,
             shell: Some("sh".into()),
-            profiles: None,
-        });
-        assert!(run_hook("test_hook", &raw).is_ok());
+        }));
+        assert!(run_hook("test_hook", &action).is_ok());
+    }
+
+    #[test]
+    fn run_hook_list_runs_all_commands() {
+        let action = HookAction::List(vec![
+            RawCommand::Simple("true".into()),
+            RawCommand::Simple("true".into()),
+        ]);
+        assert!(run_hook("test_hook", &action).is_ok());
+    }
+
+    #[test]
+    fn run_hook_list_stops_on_first_failure() {
+        let action = HookAction::List(vec![
+            RawCommand::Simple("false".into()),
+            RawCommand::Simple("true".into()),
+        ]);
+        assert!(run_hook("test_hook", &action).is_err());
     }
 
     #[test]

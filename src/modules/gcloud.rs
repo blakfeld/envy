@@ -128,7 +128,6 @@ mod tests {
             name: "gcloud".into(),
             version: None,
             tap: None,
-            profiles: None,
             after_install: None,
             extra,
         };

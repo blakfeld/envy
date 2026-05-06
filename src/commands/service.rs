@@ -8,21 +8,21 @@ use crate::package_manager::{self, PackageManager};
 
 /// Print all services from devy.yml with their current running status.
 #[mutants::skip] // thin I/O wrapper — requires a real devy.yml and package manager
-pub fn list(profile: &str) -> Result<()> {
+pub fn list() -> Result<()> {
     let config = EnvyConfig::load_default()?;
     let pm = package_manager::detect()?;
-    list_impl(&config, pm.as_ref(), profile)
+    list_impl(&config, pm.as_ref())
 }
 
-pub(crate) fn list_impl(config: &EnvyConfig, pm: &dyn PackageManager, profile: &str) -> Result<()> {
+pub(crate) fn list_impl(config: &EnvyConfig, pm: &dyn PackageManager) -> Result<()> {
     let services: Vec<_> = config
-        .normalized_dependencies(profile)
+        .normalized_dependencies()
         .into_iter()
         .filter(|dep| modules::get(&dep.name).is_service())
         .collect();
 
     if services.is_empty() {
-        println!("No services defined for this profile.");
+        println!("No services defined.");
         return Ok(());
     }
 
@@ -42,8 +42,8 @@ pub(crate) fn list_impl(config: &EnvyConfig, pm: &dyn PackageManager, profile: &
 }
 
 #[mutants::skip] // thin I/O wrapper — requires a real devy.yml and package manager
-pub fn start(name: &str, profile: &str) -> Result<()> {
-    let (dep, pm) = resolve(name, profile)?;
+pub fn start(name: &str) -> Result<()> {
+    let (dep, pm) = resolve(name)?;
     start_impl(&dep, pm.as_ref())
 }
 
@@ -63,8 +63,8 @@ pub(crate) fn start_impl(dep: &Dependency, pm: &dyn PackageManager) -> Result<()
 }
 
 #[mutants::skip] // thin I/O wrapper — requires a real devy.yml and package manager
-pub fn stop(name: &str, profile: &str) -> Result<()> {
-    let (dep, pm) = resolve(name, profile)?;
+pub fn stop(name: &str) -> Result<()> {
+    let (dep, pm) = resolve(name)?;
     stop_impl(&dep, pm.as_ref())
 }
 
@@ -83,8 +83,8 @@ pub(crate) fn stop_impl(dep: &Dependency, pm: &dyn PackageManager) -> Result<()>
 }
 
 #[mutants::skip] // thin I/O wrapper — requires a real devy.yml and package manager
-pub fn restart(name: &str, profile: &str) -> Result<()> {
-    let (dep, pm) = resolve(name, profile)?;
+pub fn restart(name: &str) -> Result<()> {
+    let (dep, pm) = resolve(name)?;
     restart_impl(&dep, pm.as_ref())
 }
 
@@ -107,9 +107,9 @@ pub(crate) fn restart_impl(dep: &Dependency, pm: &dyn PackageManager) -> Result<
 }
 
 /// Finds the named dependency in config and verifies it is a service.
-pub(crate) fn resolve_dep(config: &EnvyConfig, name: &str, profile: &str) -> Result<Dependency> {
+pub(crate) fn resolve_dep(config: &EnvyConfig, name: &str) -> Result<Dependency> {
     let dep = config
-        .normalized_dependencies(profile)
+        .normalized_dependencies()
         .into_iter()
         .find(|d| d.name == name)
         .ok_or_else(|| anyhow::anyhow!("'{}' not found in devy.yml dependencies", name))?;
@@ -121,12 +121,12 @@ pub(crate) fn resolve_dep(config: &EnvyConfig, name: &str, profile: &str) -> Res
     Ok(dep)
 }
 
-fn resolve(name: &str, profile: &str) -> Result<(Dependency, Box<dyn PackageManager>)> {
+fn resolve(name: &str) -> Result<(Dependency, Box<dyn PackageManager>)> {
     let config = EnvyConfig::load_default()?;
     let pm = package_manager::detect()?;
     pm.ensure_available()
         .with_context(|| format!("Failed to bootstrap {}", pm.name()))?;
-    let dep = resolve_dep(&config, name, profile)?;
+    let dep = resolve_dep(&config, name)?;
     Ok((dep, pm))
 }
 
@@ -146,7 +146,7 @@ mod tests {
                 .collect(),
             environment: HashMap::new(),
             commands: HashMap::new(),
-            secrets: None,
+
             hooks: Default::default(),
         }
     }
@@ -157,7 +157,7 @@ mod tests {
     fn resolve_dep_finds_correct_dep_by_name() {
         // Kills `replace == with !=` — mutation finds the wrong dep.
         let config = make_config(&["mysql", "redis"]);
-        let dep = resolve_dep(&config, "mysql", "dev").unwrap();
+        let dep = resolve_dep(&config, "mysql").unwrap();
         assert_eq!(
             dep.name, "mysql",
             "must return the dep matching the given name"
@@ -167,7 +167,7 @@ mod tests {
     #[test]
     fn resolve_dep_returns_err_for_unknown_name() {
         let config = make_config(&["mysql"]);
-        assert!(resolve_dep(&config, "nonexistent", "dev").is_err());
+        assert!(resolve_dep(&config, "nonexistent").is_err());
     }
 
     #[test]
@@ -176,7 +176,7 @@ mod tests {
         // Kills `delete ! in resolve` — mutation would bail for services, Ok for non-services.
         let config = make_config(&["node"]);
         assert!(
-            resolve_dep(&config, "node", "dev").is_err(),
+            resolve_dep(&config, "node").is_err(),
             "non-service dep must be rejected"
         );
     }
@@ -187,7 +187,7 @@ mod tests {
         // Kills `delete !` — mutation would bail here.
         let config = make_config(&["mysql"]);
         assert!(
-            resolve_dep(&config, "mysql", "dev").is_ok(),
+            resolve_dep(&config, "mysql").is_ok(),
             "service dep must be accepted"
         );
     }
@@ -293,7 +293,7 @@ mod tests {
     fn list_impl_returns_ok_with_no_services() {
         let config = make_config(&["node"]); // node is not a service
         let pm = MockPackageManager::default();
-        assert!(list_impl(&config, &pm, "dev").is_ok());
+        assert!(list_impl(&config, &pm).is_ok());
     }
 
     #[test]
@@ -303,6 +303,6 @@ mod tests {
             service_running: true,
             ..Default::default()
         };
-        assert!(list_impl(&config, &pm, "dev").is_ok());
+        assert!(list_impl(&config, &pm).is_ok());
     }
 }

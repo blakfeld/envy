@@ -79,10 +79,6 @@ dependencies:
   - my-tool:
       tap: myorg/homebrew-tools
 
-  # Profile-specific — only installed in the staging profile
-  - some-staging-dep:
-      profiles: [staging]
-
   # MySQL with a custom port and extra server flags
   - mysql:
       port: 3307
@@ -114,28 +110,32 @@ environment:
   REDIS_URL: "redis://127.0.0.1:6379"
   LOG_LEVEL: "debug"
 
-# Path to an ejson file whose decrypted values are merged into the environment.
-# Secret values override plain environment variables on conflict.
-secrets: secrets.ejson
-
 commands:
   # Simple form — runs via `sh -c`
   dev: "npm run dev"
 
-  # Configured form — custom shell, working directory, and profile restriction
+  # Configured form — custom shell and working directory
   migrate:
     cmd: "bundle exec rails db:migrate"
     cwd: ./api
     shell: bash
-    profiles: [dev, staging]
 
 hooks:
+  # Single command
   before_up: "echo 'Starting up…'"
+
+  # Configured command
   after_up:
     cmd: "bundle install"
     shell: bash
-  before_down: ~
-  after_down: "echo 'All done'"
+
+  # List of commands — run in order, stops on first failure
+  before_down:
+    - "echo 'Stopping…'"
+    - cmd: "make teardown"
+      shell: bash
+
+  after_down: ~
 ```
 
 ## Commands
@@ -145,10 +145,9 @@ hooks:
 Installs dependencies, starts services, and configures the environment.
 
 ```sh
-devy up                   # Use the dev profile (default)
-devy up --profile staging # Use a named profile
-devy up --update          # Re-resolve all versions and rewrite devy.lock
-devy up --dry-run         # Check status without making any changes
+devy up            # Set up the environment
+devy up --update   # Re-resolve all versions and rewrite devy.lock
+devy up --dry-run  # Check status without making any changes
 ```
 
 ### `devy down`
@@ -157,7 +156,6 @@ Stops all managed services.
 
 ```sh
 devy down
-devy down --profile staging
 ```
 
 ### `devy status`
@@ -194,8 +192,6 @@ devy dev      # Runs the "dev" command
 devy migrate  # Runs the "migrate" command
 ```
 
-The active profile is read from the `DEVY_PROFILE` environment variable (defaults to `dev`), so profile-restricted commands are correctly filtered.
-
 ### `devy hook <shell>`
 
 Prints a shell integration snippet. Pipe it to `eval` in your rc file (see [Installation](#installation)).
@@ -210,50 +206,6 @@ The snippet does two things:
 
 1. **Shadowenv activation** — wraps `devy up` so the new environment is activated in your current shell session immediately after installation.
 2. **Tab completion** — registers completion for all built-in subcommands (`up`, `down`, `status`, `check`, `init`, `hook`) and flags. Commands you define under `commands:` in `devy.yml` are completed **dynamically** — the completion function calls `devy _commands` at tab-press time so new commands appear without reloading your shell.
-
-## Profiles
-
-Profiles let you vary which dependencies and commands are active per environment. The default profile is `dev`. Pass `--profile <name>` to any command, or set `DEVY_PROFILE` for commands run via `devy <command>`.
-
-```yaml
-dependencies:
-  - node          # active in all profiles
-  - mysql:
-      profiles: [dev, test]   # only in dev and test
-  - some-prod-tool:
-      profiles: [production]  # only in production
-
-commands:
-  seed:
-    cmd: "bundle exec rails db:seed"
-    profiles: [dev]           # only available in dev
-```
-
-## Secrets with ejson
-
-Secrets are stored encrypted in an ejson file and decrypted at `devy up` time. Values are merged into the environment after plain `environment:` variables, so secrets win on conflict. Secret values are never printed to the terminal.
-
-```sh
-# Generate a keypair
-ejson keygen
-
-# Add the public key to your secrets file
-# Encrypt and commit secrets.ejson — the private key stays out of source control
-```
-
-```yaml
-# devy.yml
-secrets: secrets.ejson
-```
-
-```json
-// secrets.ejson
-{
-  "_public_key": "<your-public-key>",
-  "DATABASE_PASSWORD": "EJ[1:...]",
-  "API_KEY": "EJ[1:...]"
-}
-```
 
 ## Lock file
 

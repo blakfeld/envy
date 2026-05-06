@@ -7,7 +7,6 @@ mod lock;
 mod modules;
 mod output;
 mod package_manager;
-mod secrets;
 
 use clap::Parser;
 use cli::Cli;

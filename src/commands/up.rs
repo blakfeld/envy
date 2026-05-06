@@ -4,20 +4,19 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::commands::exec::run_hook;
-use crate::config::{Dependency, EnvyConfig, RawCommand};
+use crate::config::{Dependency, EnvyConfig, HookAction, RawCommand};
 use crate::env_manager::{EnvManager, Shadowenv};
 use crate::lock::{LockFile, LockedDep};
 use crate::modules;
 use crate::output;
 use crate::package_manager;
-use crate::secrets;
 
 #[mutants::skip] // thick I/O wrapper — requires a real devy.yml, PM, and shadowenv
-pub fn run(update: bool, profile: &str) -> Result<()> {
+pub fn run(update: bool) -> Result<()> {
     let config = EnvyConfig::load_default()?;
 
     let project_name = config.name.as_deref().unwrap_or("project");
-    output::header(&format!("devy up · {} [{}]", project_name, profile));
+    output::header(&format!("devy up · {}", project_name));
 
     if let Some(ref hook) = config.hooks.before_up {
         output::header("Hooks");
@@ -43,7 +42,7 @@ pub fn run(update: bool, profile: &str) -> Result<()> {
         LockFile::load(lock_path).context("Failed to read devy.lock")?
     };
 
-    let deps = config.normalized_dependencies(profile);
+    let deps = config.normalized_dependencies();
 
     // Collect module-suggested env vars after each dep installs successfully.
     // This ensures failed installs don't pollute the environment config.
@@ -58,30 +57,8 @@ pub fn run(update: bool, profile: &str) -> Result<()> {
         }
     }
 
-    // Build the merged environment: module defaults < plain vars < secrets.
     module_env.extend(config.environment.clone());
-    let mut merged_env = module_env;
-    let mut secret_count = 0usize;
-
-    if let Some(ref secrets_file) = config.secrets {
-        output::header("Secrets");
-        let path = Path::new(secrets_file);
-
-        secrets::ensure_available(pm.as_ref()).context("Failed to ensure ejson is installed")?;
-
-        output::step(&format!("Decrypting {}", secrets_file));
-        let decrypted = secrets::decrypt(path)
-            .with_context(|| format!("Failed to decrypt {}", secrets_file))?;
-
-        secret_count = decrypted.len();
-        // Merge without printing values.
-        merged_env.extend(decrypted);
-        output::success(&format!(
-            "{} secret{} loaded",
-            secret_count,
-            if secret_count == 1 { "" } else { "s" }
-        ));
-    }
+    let merged_env = module_env;
 
     if !merged_env.is_empty() {
         output::header("Environment");
@@ -100,17 +77,11 @@ pub fn run(update: bool, profile: &str) -> Result<()> {
             .setup(&cwd, &merged_env)
             .context("Failed to configure environment variables")?;
 
-        let plain_count = config.environment.len();
-        let summary = match (plain_count, secret_count) {
-            (p, 0) => format!("{p} variable{}", if p == 1 { "" } else { "s" }),
-            (0, s) => format!("{s} secret{}", if s == 1 { "" } else { "s" }),
-            (p, s) => format!(
-                "{p} variable{} + {s} secret{}",
-                if p == 1 { "" } else { "s" },
-                if s == 1 { "" } else { "s" }
-            ),
-        };
-        output::success(&format!("Environment configured ({summary})"));
+        let count = config.environment.len();
+        output::success(&format!(
+            "Environment configured ({count} variable{})",
+            if count == 1 { "" } else { "s" }
+        ));
 
         output::info(&format!(
             "Activate with: {}",
@@ -166,7 +137,7 @@ pub(crate) fn install_dep(
         output::success(&format!("Installed {}", display));
 
         if let Some(cmd) = &dep.after_install {
-            run_hook("after_install", &RawCommand::Simple(cmd.clone()))?;
+            run_hook("after_install", &HookAction::Single(RawCommand::Simple(cmd.clone())))?;
         }
     }
 

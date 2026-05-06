@@ -70,7 +70,6 @@ mod tests {
             name: "rabbitmq".into(),
             version: None,
             tap: None,
-            profiles: None,
             after_install: None,
             extra,
         }

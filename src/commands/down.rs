@@ -7,11 +7,11 @@ use crate::output;
 use crate::package_manager::{self, PackageManager};
 
 #[mutants::skip] // thin I/O wrapper — requires a real devy.yml and package manager
-pub fn run(profile: &str) -> Result<()> {
+pub fn run() -> Result<()> {
     let config = EnvyConfig::load_default()?;
 
     let project_name = config.name.as_deref().unwrap_or("project");
-    output::header(&format!("devy down · {} [{}]", project_name, profile));
+    output::header(&format!("devy down · {}", project_name));
 
     if let Some(ref hook) = config.hooks.before_down {
         output::header("Hooks");
@@ -19,7 +19,7 @@ pub fn run(profile: &str) -> Result<()> {
     }
 
     let pm = package_manager::detect()?;
-    down_impl(&config, pm.as_ref(), profile)?;
+    down_impl(&config, pm.as_ref())?;
 
     if let Some(ref hook) = config.hooks.after_down {
         output::header("Hooks");
@@ -30,8 +30,8 @@ pub fn run(profile: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn down_impl(config: &EnvyConfig, pm: &dyn PackageManager, profile: &str) -> Result<()> {
-    let deps = config.normalized_dependencies(profile);
+pub(crate) fn down_impl(config: &EnvyConfig, pm: &dyn PackageManager) -> Result<()> {
+    let deps = config.normalized_dependencies();
     let services: Vec<_> = deps
         .iter()
         .filter_map(|dep| {
@@ -85,7 +85,7 @@ mod tests {
                 .collect(),
             environment: HashMap::new(),
             commands: HashMap::new(),
-            secrets: None,
+
             hooks: Default::default(),
         }
     }
@@ -98,7 +98,7 @@ mod tests {
             service_running: true,
             ..Default::default()
         };
-        down_impl(&config, &pm, "dev").unwrap();
+        down_impl(&config, &pm).unwrap();
         assert!(
             !pm.stopped_services.borrow().is_empty(),
             "stop must be called for a running service"
@@ -115,7 +115,7 @@ mod tests {
             ..Default::default()
         };
         assert!(
-            down_impl(&config, &pm, "dev").is_err(),
+            down_impl(&config, &pm).is_err(),
             "stop failure must be propagated as Err"
         );
     }
@@ -127,7 +127,7 @@ mod tests {
             service_running: false,
             ..Default::default()
         };
-        down_impl(&config, &pm, "dev").unwrap();
+        down_impl(&config, &pm).unwrap();
         assert!(pm.stopped_services.borrow().is_empty());
     }
 
@@ -135,6 +135,6 @@ mod tests {
     fn down_impl_returns_ok_with_no_services() {
         let config = make_config(&["node"]); // node is not a service
         let pm = MockPackageManager::default();
-        assert!(down_impl(&config, &pm, "dev").is_ok());
+        assert!(down_impl(&config, &pm).is_ok());
     }
 }

@@ -70,7 +70,6 @@ mod tests {
             name: "opensearch".into(),
             version: None,
             tap: None,
-            profiles: None,
             after_install: None,
             extra,
         }

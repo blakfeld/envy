@@ -64,16 +64,10 @@ _devy() {
     up)
       _arguments \
         '--update[Re-resolve all versions and rewrite devy.lock]' \
-        '--dry-run[Check status without making changes]' \
-        '--profile[Profile to activate]:profile'
-      ;;
-    down|status|check|services)
-      _arguments '--profile[Profile to use]:profile'
+        '--dry-run[Check status without making changes]'
       ;;
     start|stop|restart)
-      _arguments \
-        '1:service name' \
-        '--profile[Profile to use]:profile'
+      _arguments '1:service name'
       ;;
     init)
       _arguments '--force[Overwrite an existing devy.yml]'
@@ -112,13 +106,7 @@ _devy_completions() {
 
   case "${COMP_WORDS[1]}" in
     up)
-      COMPREPLY=($(compgen -W "--update --dry-run --profile" -- "$cur"))
-      ;;
-    down|status|check|services)
-      COMPREPLY=($(compgen -W "--profile" -- "$cur"))
-      ;;
-    start|stop|restart)
-      COMPREPLY=($(compgen -W "--profile" -- "$cur"))
+      COMPREPLY=($(compgen -W "--update --dry-run" -- "$cur"))
       ;;
     init)
       COMPREPLY=($(compgen -W "--force" -- "$cur"))
@@ -166,7 +154,6 @@ complete -c devy -n __devy_no_subcommand -a "(__devy_user_commands)" -d "User-de
 complete -c devy -n "__fish_seen_subcommand_from hook" -a "zsh bash fish"
 complete -c devy -n "__fish_seen_subcommand_from up" -l update  -d "Re-resolve all versions"
 complete -c devy -n "__fish_seen_subcommand_from up" -l dry-run -d "Check without making changes"
-complete -c devy -n "__fish_seen_subcommand_from up down services start stop restart status check" -l profile -d "Profile to use"
 complete -c devy -n "__fish_seen_subcommand_from init" -l force -d "Overwrite existing devy.yml"
 "#;
 

@@ -7,14 +7,14 @@ use crate::package_manager;
 use super::shared;
 
 #[mutants::skip] // thin I/O wrapper — requires a real devy.yml and package manager
-pub fn run(profile: &str) -> Result<()> {
+pub fn run() -> Result<()> {
     let config = EnvyConfig::load_default()?;
 
     let project_name = config.name.as_deref().unwrap_or("project");
-    output::header(&format!("devy status · {} [{}]", project_name, profile));
+    output::header(&format!("devy status · {}", project_name));
 
     let pm = package_manager::detect()?;
-    let deps = config.normalized_dependencies(profile);
+    let deps = config.normalized_dependencies();
 
     if !deps.is_empty() {
         output::header("Dependencies");

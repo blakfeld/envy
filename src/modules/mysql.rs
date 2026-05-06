@@ -93,7 +93,6 @@ mod tests {
             name: "mysql".into(),
             version: None,
             tap: None,
-            profiles: None,
             after_install: None,
             extra,
         }
