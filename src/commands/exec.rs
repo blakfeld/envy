@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use std::process::Command;
 
-use crate::config::{EnvyCommand, EnvyConfig, HookAction, RawCommand};
+use crate::config::{EnvyCommand, EnvyConfig, HookAction};
 use crate::output;
 
 fn spawn_cmd(cmd: &EnvyCommand, label: &str) -> Result<()> {
