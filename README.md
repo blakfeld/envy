@@ -1,5 +1,8 @@
 # devy
 
+[![crates.io](https://img.shields.io/crates/v/devy.svg)](https://crates.io/crates/devy)
+[![CI](https://github.com/blakfeld/envy/actions/workflows/ci.yml/badge.svg)](https://github.com/blakfeld/envy/actions/workflows/ci.yml)
+
 A declarative developer environment manager. Define your project's dependencies, services, environment variables, and runnable commands in a single `devy.yml` file — then run `devy up` to get everything running.
 
 ## What it does
@@ -22,9 +25,10 @@ A declarative developer environment manager. Define your project's dependencies,
 ## Requirements
 
 - A supported platform (see above)
-- Rust toolchain to build from source
 
 ## Installation
+
+`devy` is published on [crates.io](https://crates.io/crates/devy). Install with:
 
 ```sh
 cargo install devy
