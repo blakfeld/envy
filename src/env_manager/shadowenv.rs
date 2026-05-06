@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 use which::which;
 
-pub const ENV_FILE: &str = ".shadowenv.d/500_envy.lisp";
+pub const ENV_FILE: &str = ".shadowenv.d/500_devy.lisp";
 
 use super::EnvManager;
 
@@ -24,7 +24,7 @@ impl Shadowenv {
         let shadowenv_dir = dir.join(".shadowenv.d");
         fs::create_dir_all(&shadowenv_dir).context("Failed to create .shadowenv.d")?;
 
-        let mut content = String::from("(provide \"envy\" \"1.0.0\")\n\n");
+        let mut content = String::from("(provide \"devy\" \"1.0.0\")\n\n");
         for (key, value) in vars {
             // Both key and value are escaped: unescaped quotes or backslashes would
             // corrupt the Lisp expression; an unescaped key could inject directives.
@@ -32,7 +32,7 @@ impl Shadowenv {
             content.push_str(&format!("(env/set \"{}\" \"{}\")\n", esc(key), esc(value)));
         }
 
-        fs::write(shadowenv_dir.join("500_envy.lisp"), content)
+        fs::write(shadowenv_dir.join("500_devy.lisp"), content)
             .context("Failed to write shadowenv environment file")?;
 
         Ok(())
@@ -89,7 +89,7 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "envy_shadow_{}_{}",
+            "devy_shadow_{}_{}",
             std::process::id(),
             N.fetch_add(1, Ordering::Relaxed)
         ));
@@ -101,17 +101,17 @@ mod tests {
 
     #[test]
     fn read_vars_missing_file_returns_none() {
-        let path = std::path::Path::new("/nonexistent/500_envy_test.lisp");
+        let path = std::path::Path::new("/nonexistent/500_devy_test.lisp");
         assert!(read_vars(path).is_none());
     }
 
     #[test]
     fn read_vars_parses_env_set_lines() {
         let dir = tmp_dir();
-        let file = dir.join("500_envy.lisp");
+        let file = dir.join("500_devy.lisp");
         std::fs::write(
             &file,
-            "(provide \"envy\" \"1.0.0\")\n\n(env/set \"FOO\" \"bar\")\n(env/set \"BAZ\" \"qux\")\n",
+            "(provide \"devy\" \"1.0.0\")\n\n(env/set \"FOO\" \"bar\")\n(env/set \"BAZ\" \"qux\")\n",
         ).unwrap();
 
         let vars = read_vars(&file).unwrap();
@@ -125,10 +125,10 @@ mod tests {
     #[test]
     fn read_vars_ignores_non_env_set_lines() {
         let dir = tmp_dir();
-        let file = dir.join("500_envy.lisp");
+        let file = dir.join("500_devy.lisp");
         std::fs::write(
             &file,
-            "(provide \"envy\" \"1.0.0\")\n; a comment\n(env/set \"KEY\" \"value\")\n",
+            "(provide \"devy\" \"1.0.0\")\n; a comment\n(env/set \"KEY\" \"value\")\n",
         )
         .unwrap();
 
@@ -142,7 +142,7 @@ mod tests {
     #[test]
     fn read_vars_unescapes_backslash_and_quote() {
         let dir = tmp_dir();
-        let file = dir.join("500_envy.lisp");
+        let file = dir.join("500_devy.lisp");
         // Stored as: (env/set "KEY" "a\\b\"c")
         std::fs::write(&file, "(env/set \"KEY\" \"a\\\\b\\\"c\")\n").unwrap();
 
@@ -155,7 +155,7 @@ mod tests {
     #[test]
     fn read_vars_empty_file_returns_empty_map() {
         let dir = tmp_dir();
-        let file = dir.join("500_envy.lisp");
+        let file = dir.join("500_devy.lisp");
         std::fs::write(&file, "").unwrap();
 
         let vars = read_vars(&file).unwrap();
@@ -175,10 +175,10 @@ mod tests {
 
         shadowenv.write_env_file(&dir, &vars).unwrap();
 
-        let file = dir.join(".shadowenv.d").join("500_envy.lisp");
+        let file = dir.join(".shadowenv.d").join("500_devy.lisp");
         assert!(file.exists());
         let content = std::fs::read_to_string(&file).unwrap();
-        assert!(content.contains("(provide \"envy\""));
+        assert!(content.contains("(provide \"devy\""));
         assert!(content.contains("MY_VAR"));
         assert!(content.contains("hello"));
 
@@ -194,7 +194,7 @@ mod tests {
 
         shadowenv.write_env_file(&dir, &vars).unwrap();
 
-        let file = dir.join(".shadowenv.d").join("500_envy.lisp");
+        let file = dir.join(".shadowenv.d").join("500_devy.lisp");
         let parsed = read_vars(&file).unwrap();
         assert_eq!(parsed["K"], "back\\slash and \"quote\"");
 
@@ -211,7 +211,7 @@ mod tests {
 
         shadowenv.write_env_file(&dir, &vars).unwrap();
 
-        let file = dir.join(".shadowenv.d").join("500_envy.lisp");
+        let file = dir.join(".shadowenv.d").join("500_devy.lisp");
         let parsed = read_vars(&file).unwrap();
         // Should round-trip correctly rather than breaking the Lisp structure.
         assert_eq!(parsed["KEY_WITH_\"QUOTE\""], "value");
@@ -265,7 +265,7 @@ mod tests {
         let mut vars = HashMap::new();
         vars.insert("SETUP_KEY".into(), "setup_val".into());
         shadowenv.write_env_file(&dir, &vars).unwrap();
-        let file = dir.join(".shadowenv.d").join("500_envy.lisp");
+        let file = dir.join(".shadowenv.d").join("500_devy.lisp");
         assert!(file.exists(), "setup must create the lisp file");
         let content = std::fs::read_to_string(&file).unwrap();
         assert!(content.contains("SETUP_KEY"));

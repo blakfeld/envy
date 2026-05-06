@@ -6,7 +6,7 @@ use crate::config::DEFAULT_PROFILE;
 
 #[derive(Parser)]
 #[command(
-    name = "envy",
+    name = "devy",
     about = "Manage developer environments declaratively",
     allow_external_subcommands = true
 )]
@@ -17,9 +17,9 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Set up the development environment defined in envy.yml
+    /// Set up the development environment defined in devy.yml
     Up {
-        /// Re-resolve all versions and rewrite envy.lock
+        /// Re-resolve all versions and rewrite devy.lock
         #[arg(long)]
         update: bool,
         /// Validate without making changes (same as `envy check`)
@@ -29,13 +29,13 @@ enum Commands {
         #[arg(long, default_value = DEFAULT_PROFILE)]
         profile: String,
     },
-    /// Create an empty envy.yml in the current directory
+    /// Create an empty devy.yml in the current directory
     Init {
-        /// Overwrite an existing envy.yml
+        /// Overwrite an existing devy.yml
         #[arg(long)]
         force: bool,
     },
-    /// List services from envy.yml and their current running status
+    /// List services from devy.yml and their current running status
     Services {
         /// Filter by profile
         #[arg(long, default_value = DEFAULT_PROFILE)]
@@ -43,26 +43,26 @@ enum Commands {
     },
     /// Start a named service
     Start {
-        /// Service name as defined in envy.yml
+        /// Service name as defined in devy.yml
         name: String,
         #[arg(long, default_value = DEFAULT_PROFILE)]
         profile: String,
     },
     /// Stop a named service
     Stop {
-        /// Service name as defined in envy.yml
+        /// Service name as defined in devy.yml
         name: String,
         #[arg(long, default_value = DEFAULT_PROFILE)]
         profile: String,
     },
     /// Restart a named service (stop then start)
     Restart {
-        /// Service name as defined in envy.yml
+        /// Service name as defined in devy.yml
         name: String,
         #[arg(long, default_value = DEFAULT_PROFILE)]
         profile: String,
     },
-    /// Stop all services defined in envy.yml
+    /// Stop all services defined in devy.yml
     Down {
         /// Only stop services tagged with this profile
         #[arg(long, default_value = DEFAULT_PROFILE)]
@@ -74,7 +74,7 @@ enum Commands {
         #[arg(long, default_value = DEFAULT_PROFILE)]
         profile: String,
     },
-    /// Validate the environment matches envy.yml without making changes
+    /// Validate the environment matches devy.yml without making changes
     Check {
         /// Filter by profile
         #[arg(long, default_value = DEFAULT_PROFILE)]
@@ -85,11 +85,11 @@ enum Commands {
         /// Shell to generate the snippet for (zsh, bash, fish)
         shell: String,
     },
-    /// List commands from envy.yml — used by shell completion, not intended for direct use
+    /// List commands from devy.yml — used by shell completion, not intended for direct use
     #[command(hide = true, name = "_commands")]
     #[allow(clippy::enum_variant_names)]
     ListCommands,
-    /// Run a command defined in envy.yml
+    /// Run a command defined in devy.yml
     #[command(external_subcommand)]
     External(Vec<String>),
 }
@@ -108,7 +108,7 @@ impl Cli {
                 profile,
             } => commands::up::run(*update, profile),
             Commands::Init { force } => {
-                commands::init::run(*force, std::path::Path::new("envy.yml"))
+                commands::init::run(*force, std::path::Path::new("devy.yml"))
             }
             Commands::Services { profile } => commands::service::list(profile),
             Commands::Start { name, profile } => commands::service::start(name, profile),
@@ -139,7 +139,7 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "envy_cli_{}_{}",
+            "devy_cli_{}_{}",
             std::process::id(),
             N.fetch_add(1, Ordering::Relaxed)
         ));
@@ -158,21 +158,21 @@ mod tests {
     #[test]
     fn cli_run_check_returns_err_without_config() {
         // Kills `replace Cli::run -> Ok(())` — mutation always returns Ok.
-        // From a temp dir with no envy.yml, `check` must fail.
+        // From a temp dir with no devy.yml, `check` must fail.
         let result = with_tempdir(|| {
-            let cli = Cli::parse_from(["envy", "check"]);
+            let cli = Cli::parse_from(["devy", "check"]);
             cli.run()
         });
         assert!(
             result.is_err(),
-            "check must return Err when no envy.yml exists"
+            "check must return Err when no devy.yml exists"
         );
     }
 
     #[test]
     fn cli_run_hook_returns_ok_for_valid_shell() {
         // Verifies that a successful command actually routes correctly.
-        let cli = Cli::parse_from(["envy", "hook", "zsh"]);
+        let cli = Cli::parse_from(["devy", "hook", "zsh"]);
         assert!(cli.run().is_ok(), "hook zsh must return Ok");
     }
 }

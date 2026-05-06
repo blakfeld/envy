@@ -210,7 +210,7 @@ mod tests {
 
     #[test]
     fn install_writes_config_when_default_port_but_cli_args_set() {
-        let dir = std::env::temp_dir().join(format!("envy_mariadb_test_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("devy_mariadb_test_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pm = crate::package_manager::MockPackageManager {
             config_dir: Some(dir.clone()),
@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn install_skips_config_when_default_port_no_args() {
-        let dir = std::env::temp_dir().join(format!("envy_mariadb_skip_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("devy_mariadb_skip_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pm = crate::package_manager::MockPackageManager {
             config_dir: Some(dir.clone()),

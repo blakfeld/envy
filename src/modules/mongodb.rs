@@ -9,7 +9,7 @@ use super::{Module, pm_dep};
 
 pub struct MongodbModule;
 
-// brew requires the mongodb/brew tap; users should add `tap: mongodb/brew` in envy.yml.
+// brew requires the mongodb/brew tap; users should add `tap: mongodb/brew` in devy.yml.
 fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "apt" => "mongodb-org",

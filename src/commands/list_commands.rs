@@ -1,11 +1,11 @@
 use crate::config::{DEFAULT_PROFILE, EnvyConfig};
 
-/// Prints each command name from envy.yml that is active for the current profile,
-/// one per line. Exits silently if envy.yml does not exist — callers are shell
+/// Prints each command name from devy.yml that is active for the current profile,
+/// one per line. Exits silently if devy.yml does not exist — callers are shell
 /// completion functions that must not produce error output.
 #[mutants::skip] // returns () and only prints to stdout — not observable in unit tests
 pub fn run() {
-    let profile = std::env::var("ENVY_PROFILE").unwrap_or_else(|_| DEFAULT_PROFILE.to_string());
+    let profile = std::env::var("DEVY_PROFILE").unwrap_or_else(|_| DEFAULT_PROFILE.to_string());
 
     if let Ok(config) = EnvyConfig::load_default() {
         let mut names: Vec<&str> = config

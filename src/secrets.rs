@@ -72,7 +72,7 @@ mod tests {
     #[test]
     fn decrypt_file_exists_but_ejson_fails_returns_error() {
         use std::io::Write;
-        let dir = std::env::temp_dir().join(format!("envy_secrets_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("devy_secrets_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("test.ejson");
         // Write a file that is not valid ejson — ejson decrypt will fail.

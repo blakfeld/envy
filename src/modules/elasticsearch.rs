@@ -7,7 +7,7 @@ use super::{Module, pm_dep};
 
 pub struct ElasticsearchModule;
 
-// brew requires the elastic/tap tap: add `tap: elastic/tap` to the dependency in envy.yml.
+// brew requires the elastic/tap tap: add `tap: elastic/tap` to the dependency in devy.yml.
 fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "apt" => "elasticsearch",

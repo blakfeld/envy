@@ -29,9 +29,9 @@ fn port(dep: &Dependency) -> u16 {
 
 fn write_config(config_dir: &Path, port: u16) -> Result<()> {
     fs::create_dir_all(config_dir).context("Failed to create postgresql config dir")?;
-    let conf = format!("# envy-managed\nport = {port}\n");
-    fs::write(config_dir.join("envy.conf"), conf)
-        .context("Failed to write postgresql envy.conf")?;
+    let conf = format!("# devy-managed\nport = {port}\n");
+    fs::write(config_dir.join("devy.conf"), conf)
+        .context("Failed to write postgresql devy.conf")?;
     Ok(())
 }
 
@@ -121,9 +121,9 @@ mod tests {
 
     #[test]
     fn write_config_creates_conf_file() {
-        let dir = std::env::temp_dir().join(format!("envy_pg_test_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("devy_pg_test_{}", std::process::id()));
         write_config(&dir, 5433).unwrap();
-        let content = std::fs::read_to_string(dir.join("envy.conf")).unwrap();
+        let content = std::fs::read_to_string(dir.join("devy.conf")).unwrap();
         assert!(content.contains("port = 5433"));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn install_writes_config_for_non_default_port() {
-        let dir = std::env::temp_dir().join(format!("envy_pg_install_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("devy_pg_install_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pm = crate::package_manager::MockPackageManager {
             config_dir: Some(dir.clone()),
@@ -201,14 +201,14 @@ mod tests {
         };
         let dep = dep_with_port(5433);
         PostgresModule.install(&pm, &dep).unwrap();
-        let content = std::fs::read_to_string(dir.join("envy.conf")).unwrap();
+        let content = std::fs::read_to_string(dir.join("devy.conf")).unwrap();
         assert!(content.contains("port = 5433"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn install_skips_config_for_default_port() {
-        let dir = std::env::temp_dir().join(format!("envy_pg_skip_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("devy_pg_skip_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pm = crate::package_manager::MockPackageManager {
             config_dir: Some(dir.clone()),
@@ -216,7 +216,7 @@ mod tests {
         };
         let dep = Dependency::simple("postgresql");
         PostgresModule.install(&pm, &dep).unwrap();
-        assert!(!dir.join("envy.conf").exists());
+        assert!(!dir.join("devy.conf").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

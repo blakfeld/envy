@@ -43,7 +43,7 @@ pub trait Module {
         false
     }
 
-    /// The install source recorded in envy.lock (e.g. "homebrew", "rustup").
+    /// The install source recorded in devy.lock (e.g. "homebrew", "rustup").
     fn source(&self) -> &'static str {
         "homebrew"
     }
@@ -52,7 +52,7 @@ pub trait Module {
     fn install(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<()>;
 
     /// The name used when managing this service via the package manager (start/stop/status).
-    /// Override when the PM service name differs from the dependency name in envy.yml.
+    /// Override when the PM service name differs from the dependency name in devy.yml.
     fn service_name<'a>(&self, dep: &'a Dependency) -> Cow<'a, str> {
         Cow::Borrowed(&dep.name)
     }
@@ -96,7 +96,7 @@ pub trait Module {
     }
 
     /// Environment variables this module injects when active (e.g. SMTP_HOST, VAULT_ADDR).
-    /// User-configured vars in envy.yml always take precedence over these defaults.
+    /// User-configured vars in devy.yml always take precedence over these defaults.
     fn env_vars(&self, _dep: &Dependency) -> HashMap<String, String> {
         HashMap::new()
     }
@@ -1197,7 +1197,7 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "envy_mysql_sec_{}_{}",
+            "devy_mysql_sec_{}_{}",
             std::process::id(),
             N.fetch_add(1, Ordering::Relaxed)
         ));

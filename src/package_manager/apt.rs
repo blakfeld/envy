@@ -93,7 +93,7 @@ impl PackageManager for Apt {
         // apt version pinning requires exact Debian version strings; the envy version field
         // is passed through as-is. Partial versions (e.g. "20") may not resolve — users
         // relying on PPAs or NodeSource repos should omit the version field and rely on
-        // envy.lock to pin the installed version across machines.
+        // devy.lock to pin the installed version across machines.
         let pkg_spec = match &dep.version {
             Some(ver) => format!("{}={}", dep.name, ver),
             None => dep.name.clone(),
@@ -162,7 +162,7 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "envy_apt_{}_{}",
+            "devy_apt_{}_{}",
             std::process::id(),
             N.fetch_add(1, Ordering::Relaxed)
         ));

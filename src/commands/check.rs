@@ -15,7 +15,7 @@ pub(crate) fn check_impl(
     profile: &str,
 ) -> Result<()> {
     let project_name = config.name.as_deref().unwrap_or("project");
-    output::header(&format!("envy check · {} [{}]", project_name, profile));
+    output::header(&format!("devy check · {} [{}]", project_name, profile));
 
     let mut issues: usize = 0;
 

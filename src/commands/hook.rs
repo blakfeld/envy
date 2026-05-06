@@ -18,25 +18,25 @@ pub fn run(shell: &str) -> Result<()> {
 //   1. An `envy` shell function that intercepts `envy up` to activate shadowenv
 //      in the current shell session after installation.
 //   2. A completion function/block that provides tab-completion for all built-in
-//      subcommands and dynamically completes user-defined commands from envy.yml
-//      by calling `command envy _commands`.
+//      subcommands and dynamically completes user-defined commands from devy.yml
+//      by calling `command devy _commands`.
 //
 // MAINTENANCE: All three snippets (ZSH, BASH, FISH) must be kept in sync.
 // When adding a new subcommand, update all three constants AND the test lists in
 // `all_builtin_subcommands_appear_in_*_snippet` below.
 
 const ZSH_SNIPPET: &str = r#"
-envy() {
+devy() {
   if [ "$1" = "up" ]; then
-    command envy "$@" && eval "$(shadowenv hook zsh)"
+    command devy "$@" && eval "$(shadowenv hook zsh)"
   elif [ "$1" = "hook" ]; then
-    command envy hook zsh
+    command devy hook zsh
   else
-    command envy "$@"
+    command devy "$@"
   fi
 }
 
-_envy() {
+_devy() {
   local -a subcmds
   subcmds=(
     'up:Set up the development environment'
@@ -47,13 +47,13 @@ _envy() {
     'restart:Restart a named service'
     'status:Show install and environment status'
     'check:Validate the environment without making changes'
-    'init:Create an empty envy.yml'
+    'init:Create an empty devy.yml'
     'hook:Print shell integration snippet'
   )
   local user_cmd
   while IFS= read -r user_cmd; do
     [[ -n "$user_cmd" ]] && subcmds+=("$user_cmd")
-  done < <(command envy _commands 2>/dev/null)
+  done < <(command devy _commands 2>/dev/null)
 
   if (( CURRENT == 2 )); then
     _describe 'command' subcmds
@@ -63,7 +63,7 @@ _envy() {
   case "${words[2]}" in
     up)
       _arguments \
-        '--update[Re-resolve all versions and rewrite envy.lock]' \
+        '--update[Re-resolve all versions and rewrite devy.lock]' \
         '--dry-run[Check status without making changes]' \
         '--profile[Profile to activate]:profile'
       ;;
@@ -76,7 +76,7 @@ _envy() {
         '--profile[Profile to use]:profile'
       ;;
     init)
-      _arguments '--force[Overwrite an existing envy.yml]'
+      _arguments '--force[Overwrite an existing devy.yml]'
       ;;
     hook)
       _values 'shell' zsh bash fish
@@ -84,25 +84,25 @@ _envy() {
   esac
 }
 
-compdef _envy envy
+compdef _devy devy
 "#;
 
 const BASH_SNIPPET: &str = r#"
-envy() {
+devy() {
   if [ "$1" = "up" ]; then
-    command envy "$@" && eval "$(shadowenv hook bash)"
+    command devy "$@" && eval "$(shadowenv hook bash)"
   elif [ "$1" = "hook" ]; then
-    command envy hook bash
+    command devy hook bash
   else
-    command envy "$@"
+    command devy "$@"
   fi
 }
 
-_envy_completions() {
+_devy_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   local subcmds="up down services start stop restart status check init hook"
   local user_cmds
-  user_cmds=$(command envy _commands 2>/dev/null)
+  user_cmds=$(command devy _commands 2>/dev/null)
   [ -n "$user_cmds" ] && subcmds="$subcmds $user_cmds"
 
   if [ "$COMP_CWORD" -eq 1 ]; then
@@ -129,45 +129,45 @@ _envy_completions() {
   esac
 }
 
-complete -F _envy_completions envy
+complete -F _devy_completions devy
 "#;
 
 const FISH_SNIPPET: &str = r#"
-function envy
+function devy
   if test "$argv[1]" = "up"
-    command envy $argv; and shadowenv hook fish | source
+    command devy $argv; and shadowenv hook fish | source
   else if test "$argv[1]" = "hook"
-    command envy hook fish
+    command devy hook fish
   else
-    command envy $argv
+    command devy $argv
   end
 end
 
-function __envy_user_commands
-  command envy _commands 2>/dev/null
+function __devy_user_commands
+  command devy _commands 2>/dev/null
 end
 
-function __envy_no_subcommand
+function __devy_no_subcommand
   not __fish_seen_subcommand_from up down services start stop restart status check init hook
 end
 
-complete -c envy -f
-complete -c envy -n __envy_no_subcommand -a up       -d "Set up the development environment"
-complete -c envy -n __envy_no_subcommand -a down     -d "Stop all services"
-complete -c envy -n __envy_no_subcommand -a services -d "List services and their status"
-complete -c envy -n __envy_no_subcommand -a start    -d "Start a named service"
-complete -c envy -n __envy_no_subcommand -a stop     -d "Stop a named service"
-complete -c envy -n __envy_no_subcommand -a restart  -d "Restart a named service"
-complete -c envy -n __envy_no_subcommand -a status   -d "Show install and environment status"
-complete -c envy -n __envy_no_subcommand -a check    -d "Validate the environment"
-complete -c envy -n __envy_no_subcommand -a init     -d "Scaffold an envy.yml"
-complete -c envy -n __envy_no_subcommand -a hook     -d "Print shell integration snippet"
-complete -c envy -n __envy_no_subcommand -a "(__envy_user_commands)" -d "User-defined command"
-complete -c envy -n "__fish_seen_subcommand_from hook" -a "zsh bash fish"
-complete -c envy -n "__fish_seen_subcommand_from up" -l update  -d "Re-resolve all versions"
-complete -c envy -n "__fish_seen_subcommand_from up" -l dry-run -d "Check without making changes"
-complete -c envy -n "__fish_seen_subcommand_from up down services start stop restart status check" -l profile -d "Profile to use"
-complete -c envy -n "__fish_seen_subcommand_from init" -l force -d "Overwrite existing envy.yml"
+complete -c devy -f
+complete -c devy -n __devy_no_subcommand -a up       -d "Set up the development environment"
+complete -c devy -n __devy_no_subcommand -a down     -d "Stop all services"
+complete -c devy -n __devy_no_subcommand -a services -d "List services and their status"
+complete -c devy -n __devy_no_subcommand -a start    -d "Start a named service"
+complete -c devy -n __devy_no_subcommand -a stop     -d "Stop a named service"
+complete -c devy -n __devy_no_subcommand -a restart  -d "Restart a named service"
+complete -c devy -n __devy_no_subcommand -a status   -d "Show install and environment status"
+complete -c devy -n __devy_no_subcommand -a check    -d "Validate the environment"
+complete -c devy -n __devy_no_subcommand -a init     -d "Scaffold a devy.yml"
+complete -c devy -n __devy_no_subcommand -a hook     -d "Print shell integration snippet"
+complete -c devy -n __devy_no_subcommand -a "(__devy_user_commands)" -d "User-defined command"
+complete -c devy -n "__fish_seen_subcommand_from hook" -a "zsh bash fish"
+complete -c devy -n "__fish_seen_subcommand_from up" -l update  -d "Re-resolve all versions"
+complete -c devy -n "__fish_seen_subcommand_from up" -l dry-run -d "Check without making changes"
+complete -c devy -n "__fish_seen_subcommand_from up down services start stop restart status check" -l profile -d "Profile to use"
+complete -c devy -n "__fish_seen_subcommand_from init" -l force -d "Overwrite existing devy.yml"
 "#;
 
 #[cfg(test)]
@@ -213,22 +213,22 @@ mod tests {
 
     #[test]
     fn zsh_snippet_contains_completion_function() {
-        assert!(ZSH_SNIPPET.contains("_envy()"));
-        assert!(ZSH_SNIPPET.contains("compdef _envy envy"));
+        assert!(ZSH_SNIPPET.contains("_devy()"));
+        assert!(ZSH_SNIPPET.contains("compdef _devy devy"));
         assert!(ZSH_SNIPPET.contains("_commands"));
     }
 
     #[test]
     fn bash_snippet_contains_completion_function() {
-        assert!(BASH_SNIPPET.contains("_envy_completions"));
-        assert!(BASH_SNIPPET.contains("complete -F _envy_completions envy"));
+        assert!(BASH_SNIPPET.contains("_devy_completions"));
+        assert!(BASH_SNIPPET.contains("complete -F _devy_completions devy"));
         assert!(BASH_SNIPPET.contains("_commands"));
     }
 
     #[test]
     fn fish_snippet_contains_completion_directives() {
-        assert!(FISH_SNIPPET.contains("complete -c envy"));
-        assert!(FISH_SNIPPET.contains("__envy_user_commands"));
+        assert!(FISH_SNIPPET.contains("complete -c devy"));
+        assert!(FISH_SNIPPET.contains("__devy_user_commands"));
         assert!(FISH_SNIPPET.contains("_commands"));
     }
 

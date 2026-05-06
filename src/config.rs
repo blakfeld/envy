@@ -106,7 +106,7 @@ pub struct DepConfig {
     /// Shell command to run immediately after the dependency is freshly installed.
     /// Runs once per install, not on subsequent `envy up` calls when the dep is
     /// already present. Re-runs if the dep is removed and reinstalled (e.g. after
-    /// `envy up --update`). Not recorded in envy.lock, so not idempotent across
+    /// `envy up --update`). Not recorded in devy.lock, so not idempotent across
     /// installs.
     pub after_install: Option<String>,
     /// Module-specific keys (e.g. port, cli_args) are captured here.
@@ -165,26 +165,26 @@ impl Dependency {
 impl EnvyConfig {
     pub fn load_default() -> Result<Self> {
         let path = Self::find_config().ok_or_else(|| {
-            anyhow::anyhow!("envy.yml not found — are you inside an envy project?")
+            anyhow::anyhow!("devy.yml not found — are you inside a devy project?")
         })?;
         Self::load(&path)
     }
 
     /// Walks from the current directory up to the nearest `.git` root or `$HOME`,
-    /// whichever comes first, looking for `envy.yml`.
+    /// whichever comes first, looking for `devy.yml`.
     ///
-    /// Stopping at the git root prevents a malicious or unrelated `envy.yml` planted
+    /// Stopping at the git root prevents a malicious or unrelated `devy.yml` planted
     /// in a parent directory from being picked up and having its hooks executed.
     pub(crate) fn find_config() -> Option<std::path::PathBuf> {
         let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
         let mut dir = std::env::current_dir().ok()?;
         loop {
-            let candidate = dir.join("envy.yml");
+            let candidate = dir.join("devy.yml");
             if candidate.exists() {
                 return Some(candidate);
             }
             // Stop at repository root: a .git here means we've already searched
-            // the entire current project without finding envy.yml.
+            // the entire current project without finding devy.yml.
             if dir.join(".git").exists() {
                 return None;
             }
@@ -248,7 +248,7 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "envy_cfg_{}_{}",
+            "devy_cfg_{}_{}",
             std::process::id(),
             N.fetch_add(1, Ordering::Relaxed)
         ));
@@ -456,7 +456,7 @@ mod tests {
     #[test]
     fn load_valid_yaml_ok() {
         let dir = tmp_dir();
-        let path = dir.join("envy.yml");
+        let path = dir.join("devy.yml");
         std::fs::write(&path, "name: test\n").unwrap();
         assert!(EnvyConfig::load(&path).is_ok());
         let _ = std::fs::remove_dir_all(&dir);
@@ -464,14 +464,14 @@ mod tests {
 
     #[test]
     fn load_missing_file_err() {
-        let path = std::path::Path::new("/nonexistent/envy_test_missing.yml");
+        let path = std::path::Path::new("/nonexistent/devy_test_missing.yml");
         assert!(EnvyConfig::load(path).is_err());
     }
 
     #[test]
     fn load_invalid_yaml_err() {
         let dir = tmp_dir();
-        let path = dir.join("envy.yml");
+        let path = dir.join("devy.yml");
         std::fs::write(&path, "dependencies: [unclosed\n").unwrap();
         assert!(EnvyConfig::load(&path).is_err());
         let _ = std::fs::remove_dir_all(&dir);
@@ -500,22 +500,22 @@ mod tests {
 
     #[test]
     fn find_config_finds_file_at_git_root_from_subdirectory() {
-        // Layout: root/.git, root/envy.yml, root/a/b/ (CWD)
+        // Layout: root/.git, root/devy.yml, root/a/b/ (CWD)
         let root = tmp_dir();
         let sub = root.join("a").join("b");
         std::fs::create_dir_all(&sub).unwrap();
         std::fs::create_dir_all(root.join(".git")).unwrap();
-        std::fs::write(root.join("envy.yml"), "name: test\n").unwrap();
+        std::fs::write(root.join("devy.yml"), "name: test\n").unwrap();
 
         let found = with_cwd(&sub, EnvyConfig::find_config);
-        let expected = root.canonicalize().unwrap().join("envy.yml");
+        let expected = root.canonicalize().unwrap().join("devy.yml");
         assert_eq!(found, Some(expected));
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn find_config_stops_at_git_root_when_no_envy_yml() {
-        // Layout: root/.git (no envy.yml), root/a/ (CWD)
+    fn find_config_stops_at_git_root_when_no_devy_yml() {
+        // Layout: root/.git (no devy.yml), root/a/ (CWD)
         let root = tmp_dir();
         let sub = root.join("a");
         std::fs::create_dir_all(&sub).unwrap();
@@ -527,35 +527,35 @@ mod tests {
     }
 
     #[test]
-    fn find_config_finds_envy_yml_in_current_dir() {
-        // envy.yml in CWD itself — no walking needed.
+    fn find_config_finds_devy_yml_in_current_dir() {
+        // devy.yml in CWD itself — no walking needed.
         let root = tmp_dir();
         std::fs::create_dir_all(root.join(".git")).unwrap();
-        std::fs::write(root.join("envy.yml"), "name: test\n").unwrap();
+        std::fs::write(root.join("devy.yml"), "name: test\n").unwrap();
 
         let found = with_cwd(&root, EnvyConfig::find_config);
-        let expected = root.canonicalize().unwrap().join("envy.yml");
+        let expected = root.canonicalize().unwrap().join("devy.yml");
         assert_eq!(found, Some(expected));
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn find_config_returns_none_in_dir_with_no_git_and_no_envy_yml() {
-        // A temp dir with no .git and no envy.yml above it (up to HOME).
+    fn find_config_returns_none_in_dir_with_no_git_and_no_devy_yml() {
+        // A temp dir with no .git and no devy.yml above it (up to HOME).
         // create a two-level hierarchy so it has a parent to walk to.
         let root = tmp_dir();
         let sub = root.join("inner");
         std::fs::create_dir_all(&sub).unwrap();
-        // No envy.yml, no .git → walks up until hitting HOME or root → returns None.
+        // No devy.yml, no .git → walks up until hitting HOME or root → returns None.
         // (On most systems this terminates when it hits an existing git root higher up
-        // or HOME; either way the specific envy.yml in this tree doesn't exist.)
+        // or HOME; either way the specific devy.yml in this tree doesn't exist.)
         let found = with_cwd(&sub, EnvyConfig::find_config);
-        // We can't assert None here unconditionally since there might be an envy.yml
+        // We can't assert None here unconditionally since there might be an devy.yml
         // higher in the real tree; just verify it doesn't find one IN our temp root.
         if let Some(ref p) = found {
             assert!(
                 !p.starts_with(&root),
-                "find_config must not return a path inside our tempdir that has no envy.yml"
+                "find_config must not return a path inside our tempdir that has no devy.yml"
             );
         }
         let _ = std::fs::remove_dir_all(&root);

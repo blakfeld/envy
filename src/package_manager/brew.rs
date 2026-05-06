@@ -133,7 +133,7 @@ impl PackageManager for Homebrew {
 
 /// Validates that a tap string has the form `org/repo` with no path components,
 /// URL schemes, or shell-special characters. Prevents arbitrary GitHub repos from
-/// being added via a malicious envy.yml tap field.
+/// being added via a malicious devy.yml tap field.
 fn validate_tap(tap: &str) -> Result<()> {
     let parts: Vec<&str> = tap.split('/').collect();
     if parts.len() != 2 {

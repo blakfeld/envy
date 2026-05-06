@@ -32,12 +32,12 @@ pub fn run_hook(label: &str, raw: &RawCommand) -> Result<()> {
     Ok(())
 }
 
-#[mutants::skip] // thin I/O wrapper — requires a real envy.yml on disk
+#[mutants::skip] // thin I/O wrapper — requires a real devy.yml on disk
 pub fn run(name: &str) -> Result<()> {
     let config = EnvyConfig::load_default()?;
 
-    // `envy <cmd>` has no --profile flag; fall back to ENVY_PROFILE env var.
-    let profile = std::env::var("ENVY_PROFILE").unwrap_or_else(|_| DEFAULT_PROFILE.to_string());
+    // `envy <cmd>` has no --profile flag; fall back to DEVY_PROFILE env var.
+    let profile = std::env::var("DEVY_PROFILE").unwrap_or_else(|_| DEFAULT_PROFILE.to_string());
 
     let raw = config
         .commands

@@ -6,8 +6,8 @@ use crate::modules;
 use crate::output;
 use crate::package_manager::{self, PackageManager};
 
-/// Print all services from envy.yml with their current running status.
-#[mutants::skip] // thin I/O wrapper — requires a real envy.yml and package manager
+/// Print all services from devy.yml with their current running status.
+#[mutants::skip] // thin I/O wrapper — requires a real devy.yml and package manager
 pub fn list(profile: &str) -> Result<()> {
     let config = EnvyConfig::load_default()?;
     let pm = package_manager::detect()?;
@@ -41,7 +41,7 @@ pub(crate) fn list_impl(config: &EnvyConfig, pm: &dyn PackageManager, profile: &
     Ok(())
 }
 
-#[mutants::skip] // thin I/O wrapper — requires a real envy.yml and package manager
+#[mutants::skip] // thin I/O wrapper — requires a real devy.yml and package manager
 pub fn start(name: &str, profile: &str) -> Result<()> {
     let (dep, pm) = resolve(name, profile)?;
     start_impl(&dep, pm.as_ref())
@@ -62,7 +62,7 @@ pub(crate) fn start_impl(dep: &Dependency, pm: &dyn PackageManager) -> Result<()
     Ok(())
 }
 
-#[mutants::skip] // thin I/O wrapper — requires a real envy.yml and package manager
+#[mutants::skip] // thin I/O wrapper — requires a real devy.yml and package manager
 pub fn stop(name: &str, profile: &str) -> Result<()> {
     let (dep, pm) = resolve(name, profile)?;
     stop_impl(&dep, pm.as_ref())
@@ -82,7 +82,7 @@ pub(crate) fn stop_impl(dep: &Dependency, pm: &dyn PackageManager) -> Result<()>
     Ok(())
 }
 
-#[mutants::skip] // thin I/O wrapper — requires a real envy.yml and package manager
+#[mutants::skip] // thin I/O wrapper — requires a real devy.yml and package manager
 pub fn restart(name: &str, profile: &str) -> Result<()> {
     let (dep, pm) = resolve(name, profile)?;
     restart_impl(&dep, pm.as_ref())
@@ -112,7 +112,7 @@ pub(crate) fn resolve_dep(config: &EnvyConfig, name: &str, profile: &str) -> Res
         .normalized_dependencies(profile)
         .into_iter()
         .find(|d| d.name == name)
-        .ok_or_else(|| anyhow::anyhow!("'{}' not found in envy.yml dependencies", name))?;
+        .ok_or_else(|| anyhow::anyhow!("'{}' not found in devy.yml dependencies", name))?;
 
     if !modules::get(&dep.name).is_service() {
         bail!("'{}' is not a service", name);

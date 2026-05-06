@@ -5,7 +5,7 @@ use crate::output;
 
 pub fn run(force: bool, config_path: &Path) -> Result<()> {
     if config_path.exists() && !force {
-        bail!("envy.yml already exists. Use {} to overwrite.", "--force");
+        bail!("devy.yml already exists. Use {} to overwrite.", "--force");
     }
 
     let content = "\
@@ -32,12 +32,12 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "envy_init_{}_{}",
+            "devy_init_{}_{}",
             std::process::id(),
             N.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        dir.join("envy.yml")
+        dir.join("devy.yml")
     }
 
     #[test]

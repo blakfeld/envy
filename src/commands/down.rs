@@ -6,12 +6,12 @@ use crate::modules;
 use crate::output;
 use crate::package_manager::{self, PackageManager};
 
-#[mutants::skip] // thin I/O wrapper — requires a real envy.yml and package manager
+#[mutants::skip] // thin I/O wrapper — requires a real devy.yml and package manager
 pub fn run(profile: &str) -> Result<()> {
     let config = EnvyConfig::load_default()?;
 
     let project_name = config.name.as_deref().unwrap_or("project");
-    output::header(&format!("envy down · {} [{}]", project_name, profile));
+    output::header(&format!("devy down · {} [{}]", project_name, profile));
 
     if let Some(ref hook) = config.hooks.before_down {
         output::header("Hooks");

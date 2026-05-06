@@ -216,11 +216,11 @@ pub fn print_env_table(config_env: &HashMap<String, String>, bold_errors: bool) 
             println!(
                 "  {}  environment not configured — run {}",
                 "✗".red().bold(),
-                "envy up".bold()
+                "devy up".bold()
             );
         }
         None => {
-            output::info("not configured — run envy up first");
+            output::info("not configured — run devy up first");
         }
         Some(ref vars) if bold_errors => {
             for key in config_env.keys() {

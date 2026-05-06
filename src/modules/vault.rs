@@ -75,7 +75,7 @@ impl Module for VaultModule {
         let mut vars = HashMap::new();
         vars.insert("VAULT_ADDR".into(), format!("http://127.0.0.1:{p}"));
         if dev_mode(dep) {
-            // Conventional root token for dev mode; users can override in envy.yml environment.
+            // Conventional root token for dev mode; users can override in devy.yml environment.
             vars.insert("VAULT_TOKEN".into(), "root".into());
         }
         vars

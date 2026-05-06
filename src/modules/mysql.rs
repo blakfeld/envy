@@ -226,7 +226,7 @@ mod tests {
 
     #[test]
     fn install_writes_config_when_custom_port_and_config_dir_available() {
-        let dir = std::env::temp_dir().join(format!("envy_mysql_test_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("devy_mysql_test_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pm = crate::package_manager::MockPackageManager {
             config_dir: Some(dir.clone()),
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn install_writes_config_when_default_port_but_cli_args_set() {
         // Tests the || condition: even with default port, cli_args trigger config write.
-        let dir = std::env::temp_dir().join(format!("envy_mysql_test_args_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("devy_mysql_test_args_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pm = crate::package_manager::MockPackageManager {
             config_dir: Some(dir.clone()),
@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn install_skips_config_when_default_port_no_args() {
         // With default port and no cli_args, config file should NOT be written.
-        let dir = std::env::temp_dir().join(format!("envy_mysql_test_skip_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("devy_mysql_test_skip_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pm = crate::package_manager::MockPackageManager {
             config_dir: Some(dir.clone()),

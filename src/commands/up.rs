@@ -12,12 +12,12 @@ use crate::output;
 use crate::package_manager;
 use crate::secrets;
 
-#[mutants::skip] // thick I/O wrapper — requires a real envy.yml, PM, and shadowenv
+#[mutants::skip] // thick I/O wrapper — requires a real devy.yml, PM, and shadowenv
 pub fn run(update: bool, profile: &str) -> Result<()> {
     let config = EnvyConfig::load_default()?;
 
     let project_name = config.name.as_deref().unwrap_or("project");
-    output::header(&format!("envy up · {} [{}]", project_name, profile));
+    output::header(&format!("devy up · {} [{}]", project_name, profile));
 
     if let Some(ref hook) = config.hooks.before_up {
         output::header("Hooks");
@@ -36,11 +36,11 @@ pub fn run(update: bool, profile: &str) -> Result<()> {
     // Load the lock file unless --update was passed.
     let lock = if update {
         if lock_path.exists() {
-            output::step("Ignoring envy.lock (--update)");
+            output::step("Ignoring devy.lock (--update)");
         }
         None
     } else {
-        LockFile::load(lock_path).context("Failed to read envy.lock")?
+        LockFile::load(lock_path).context("Failed to read devy.lock")?
     };
 
     let deps = config.normalized_dependencies(profile);
@@ -208,7 +208,7 @@ pub(crate) fn write_lock(
     let lock = LockFile {
         dependencies: locked,
     };
-    lock.write(path).context("Failed to write envy.lock")?;
+    lock.write(path).context("Failed to write devy.lock")?;
     output::success(&format!("Lock file written to {}", crate::lock::PATH));
     Ok(())
 }
@@ -225,7 +225,7 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);
         std::env::temp_dir().join(format!(
-            "envy_up_{}_{}.lock",
+            "devy_up_{}_{}.lock",
             std::process::id(),
             N.fetch_add(1, Ordering::Relaxed)
         ))
