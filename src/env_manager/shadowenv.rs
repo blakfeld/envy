@@ -20,15 +20,32 @@ impl Shadowenv {
         which("shadowenv").is_ok()
     }
 
-    fn write_env_file(&self, dir: &Path, vars: &HashMap<String, String>) -> Result<()> {
+    fn write_env_file(
+        &self,
+        dir: &Path,
+        vars: &HashMap<String, String>,
+        path_prepends: &[String],
+    ) -> Result<()> {
         let shadowenv_dir = dir.join(".shadowenv.d");
         fs::create_dir_all(&shadowenv_dir).context("Failed to create .shadowenv.d")?;
 
+        let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
         let mut content = String::from("(provide \"devy\" \"1.0.0\")\n\n");
+
+        // PATH prepends: emit in reverse so the first entry ends up leftmost in PATH.
+        for entry in path_prepends.iter().rev() {
+            content.push_str(&format!(
+                "(env/prepend-to-pathlist \"PATH\" \"{}\")\n",
+                esc(entry)
+            ));
+        }
+        if !path_prepends.is_empty() {
+            content.push('\n');
+        }
+
         for (key, value) in vars {
             // Both key and value are escaped: unescaped quotes or backslashes would
             // corrupt the Lisp expression; an unescaped key could inject directives.
-            let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
             content.push_str(&format!("(env/set \"{}\" \"{}\")\n", esc(key), esc(value)));
         }
 
@@ -74,8 +91,13 @@ impl EnvManager for Shadowenv {
         "shadowenv"
     }
 
-    fn setup(&self, dir: &Path, vars: &HashMap<String, String>) -> Result<()> {
-        self.write_env_file(dir, vars)?;
+    fn setup(
+        &self,
+        dir: &Path,
+        vars: &HashMap<String, String>,
+        path_prepends: &[String],
+    ) -> Result<()> {
+        self.write_env_file(dir, vars, path_prepends)?;
         self.trust(dir)?;
         Ok(())
     }
@@ -173,7 +195,7 @@ mod tests {
         let mut vars = HashMap::new();
         vars.insert("MY_VAR".into(), "hello".into());
 
-        shadowenv.write_env_file(&dir, &vars).unwrap();
+        shadowenv.write_env_file(&dir, &vars, &[]).unwrap();
 
         let file = dir.join(".shadowenv.d").join("500_devy.lisp");
         assert!(file.exists());
@@ -192,7 +214,7 @@ mod tests {
         let mut vars = HashMap::new();
         vars.insert("K".into(), "back\\slash and \"quote\"".into());
 
-        shadowenv.write_env_file(&dir, &vars).unwrap();
+        shadowenv.write_env_file(&dir, &vars, &[]).unwrap();
 
         let file = dir.join(".shadowenv.d").join("500_devy.lisp");
         let parsed = read_vars(&file).unwrap();
@@ -209,7 +231,7 @@ mod tests {
         // A key with a quote would be a Lisp injection if not escaped.
         vars.insert("KEY_WITH_\"QUOTE\"".into(), "value".into());
 
-        shadowenv.write_env_file(&dir, &vars).unwrap();
+        shadowenv.write_env_file(&dir, &vars, &[]).unwrap();
 
         let file = dir.join(".shadowenv.d").join("500_devy.lisp");
         let parsed = read_vars(&file).unwrap();
@@ -264,7 +286,7 @@ mod tests {
         let shadowenv = Shadowenv::new();
         let mut vars = HashMap::new();
         vars.insert("SETUP_KEY".into(), "setup_val".into());
-        shadowenv.write_env_file(&dir, &vars).unwrap();
+        shadowenv.write_env_file(&dir, &vars, &[]).unwrap();
         let file = dir.join(".shadowenv.d").join("500_devy.lisp");
         assert!(file.exists(), "setup must create the lisp file");
         let content = std::fs::read_to_string(&file).unwrap();
@@ -283,7 +305,7 @@ mod tests {
         let shadowenv = Shadowenv::new();
         let mut vars = HashMap::new();
         vars.insert("KEY".into(), "val".into());
-        let result = shadowenv.setup(&dir, &vars);
+        let result = shadowenv.setup(&dir, &vars, &[]);
         assert!(
             result.is_err(),
             "setup must fail when shadowenv binary is absent"
@@ -302,7 +324,7 @@ mod tests {
         let shadowenv = Shadowenv::new();
         let mut vars = HashMap::new();
         vars.insert("KEY".into(), "val".into());
-        let result = shadowenv.setup(&dir, &vars);
+        let result = shadowenv.setup(&dir, &vars, &[]);
         assert!(
             result.is_ok(),
             "setup must succeed when shadowenv is installed"

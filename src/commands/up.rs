@@ -43,26 +43,29 @@ pub fn run(update: bool) -> Result<()> {
     };
 
     let deps = config.normalized_dependencies();
+    let project_root = std::env::current_dir().context("Failed to get current directory")?;
 
-    // Collect module-suggested env vars after each dep installs successfully.
+    // Collect module-suggested env vars and PATH prepends after each dep installs.
     // This ensures failed installs don't pollute the environment config.
     let mut module_env: HashMap<String, String> = HashMap::new();
+    let mut module_path_prepends: Vec<String> = Vec::new();
 
     if !deps.is_empty() {
         output::header("Dependencies");
         for dep in &deps {
             let effective = apply_lock(dep, lock.as_ref());
-            install_dep(pm.as_ref(), &effective)?;
-            module_env.extend(modules::get(&dep.name).env_vars(&effective));
+            install_dep(pm.as_ref(), &effective, &project_root)?;
+            let m = modules::get(&dep.name);
+            module_env.extend(m.env_vars(&effective));
+            module_path_prepends.extend(m.path_prepends(&effective));
         }
     }
 
     module_env.extend(config.environment.clone());
     let merged_env = module_env;
 
-    if !merged_env.is_empty() {
+    if !merged_env.is_empty() || !module_path_prepends.is_empty() {
         output::header("Environment");
-        let cwd = std::env::current_dir().context("Failed to get current directory")?;
         let env_mgr = Shadowenv::new();
 
         if !env_mgr.is_available() {
@@ -74,7 +77,7 @@ pub fn run(update: bool) -> Result<()> {
 
         output::step(&format!("Writing {} config", env_mgr.name()));
         env_mgr
-            .setup(&cwd, &merged_env)
+            .setup(&project_root, &merged_env, &module_path_prepends)
             .context("Failed to configure environment variables")?;
 
         let count = config.environment.len();
@@ -123,6 +126,7 @@ pub(crate) fn apply_lock(dep: &Dependency, lock: Option<&LockFile>) -> Dependenc
 pub(crate) fn install_dep(
     pm: &dyn package_manager::PackageManager,
     dep: &Dependency,
+    project_root: &std::path::Path,
 ) -> Result<()> {
     let module = modules::get(&dep.name);
     let display = dep.versioned_name();
@@ -143,6 +147,10 @@ pub(crate) fn install_dep(
             )?;
         }
     }
+
+    module
+        .post_setup(dep, project_root)
+        .with_context(|| format!("post_setup failed for {}", dep.name))?;
 
     if module.is_service() {
         if module.is_running(pm, dep)? {
@@ -272,7 +280,7 @@ mod tests {
         };
         let dep = Dependency::simple("node");
         assert!(
-            install_dep(&pm, &dep).is_err(),
+            install_dep(&pm, &dep, std::path::Path::new("/tmp")).is_err(),
             "install failure must propagate as Err"
         );
     }
@@ -284,7 +292,7 @@ mod tests {
             ..Default::default()
         };
         let dep = Dependency::simple("node");
-        assert!(install_dep(&pm, &dep).is_ok());
+        assert!(install_dep(&pm, &dep, std::path::Path::new("/tmp")).is_ok());
     }
 
     // ── write_lock ────────────────────────────────────────────────────────────

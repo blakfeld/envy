@@ -8,6 +8,7 @@ mod elixir;
 mod erlang;
 mod gcloud;
 mod generic;
+mod java;
 mod kafka;
 mod kotlin;
 mod mailhog;
@@ -21,6 +22,7 @@ mod nginx;
 mod node;
 mod opensearch;
 mod postgres;
+mod python;
 mod rabbitmq;
 mod redis;
 mod ruby;
@@ -101,6 +103,20 @@ pub trait Module {
         HashMap::new()
     }
 
+    /// PATH entries to prepend when this module is active.
+    /// Emitted as shadowenv `env/prepend-to-pathlist` directives so they compose
+    /// correctly with the user's existing PATH.
+    fn path_prepends(&self, _dep: &Dependency) -> Vec<String> {
+        vec![]
+    }
+
+    /// Runs unconditionally after the install-or-skip decision, even when the
+    /// dependency already matched the lock file. Use for steps that must always
+    /// execute, such as `bundle install` or `pip install -r requirements.txt`.
+    fn post_setup(&self, _dep: &Dependency, _project_root: &std::path::Path) -> Result<()> {
+        Ok(())
+    }
+
     /// Returns the exact version string currently installed.
     /// Default delegates to the package manager; override for non-brew sources.
     fn resolved_version(
@@ -136,21 +152,13 @@ pub fn get(name: &str) -> Box<dyn Module> {
         "node" | "nodejs" | "javascript" | "js" => Box::new(node::NodeModule),
         "typescript" | "ts" => Box::new(typescript::TypeScriptModule),
         "ruby" => Box::new(ruby::RubyModule),
-        "python" | "python3" => Box::new(PackageModule {
-            default: "python",
-            apt: "python3",
-            winget: "Python.Python.3",
-        }),
+        "python" | "python3" => Box::new(python::PythonModule),
         "go" | "golang" => Box::new(PackageModule {
             default: "go",
             apt: "golang-go",
             winget: "GoLang.Go",
         }),
-        "java" | "openjdk" => Box::new(PackageModule {
-            default: "openjdk",
-            apt: "default-jdk",
-            winget: "Microsoft.OpenJDK.21",
-        }),
+        "java" | "openjdk" => Box::new(java::JavaModule),
         "kotlin" => Box::new(kotlin::KotlinModule),
         "scala" => Box::new(PackageModule {
             default: "scala",
@@ -326,13 +334,6 @@ pub(super) fn node_pkg(pm: &dyn PackageManager) -> &'static str {
     }
 }
 
-/// Returns the platform-appropriate package name for Ruby.
-pub(super) fn ruby_pkg(pm: &dyn PackageManager) -> &'static str {
-    match pm.name() {
-        "winget" => "RubyInstallerTeam.Ruby.3",
-        _ => "ruby",
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -582,17 +583,8 @@ mod tests {
 
     #[test]
     fn get_ruby_routes_to_ruby_module() {
-        // ruby_pkg on brew returns "ruby"; GenericModule also passes "ruby" through.
-        // Use installed_pkg to distinguish: ruby_pkg on apt also returns "ruby".
-        // Best way: verify source() is "homebrew" (which GenericModule also returns…)
-        // Instead verify via winget: ruby_pkg("winget") = "RubyInstallerTeam.Ruby.3".
-        let pm = crate::package_manager::MockPackageManager {
-            name: "winget",
-            installed_pkg: Some("RubyInstallerTeam.Ruby.3"),
-            ..Default::default()
-        };
-        let dep = Dependency::simple("ruby");
-        assert!(get("ruby").is_installed(&pm, &dep).unwrap());
+        // RubyModule.source() returns "rbenv", which GenericModule does not.
+        assert_eq!(get("ruby").source(), "rbenv");
     }
 
     #[test]
@@ -1078,26 +1070,6 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(node_pkg(&pm), "node");
-    }
-
-    // ── ruby_pkg ──────────────────────────────────────────────────────────────
-
-    #[test]
-    fn ruby_pkg_winget() {
-        let pm = crate::package_manager::MockPackageManager {
-            name: "winget",
-            ..Default::default()
-        };
-        assert_eq!(ruby_pkg(&pm), "RubyInstallerTeam.Ruby.3");
-    }
-
-    #[test]
-    fn ruby_pkg_brew_default() {
-        let pm = crate::package_manager::MockPackageManager {
-            name: "brew",
-            ..Default::default()
-        };
-        assert_eq!(ruby_pkg(&pm), "ruby");
     }
 
     // ── PackageModule ─────────────────────────────────────────────────────────
