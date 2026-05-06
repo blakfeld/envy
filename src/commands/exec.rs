@@ -66,7 +66,7 @@ pub fn run(name: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{CommandConfig, HookAction};
+    use crate::config::{CommandConfig, HookAction, RawCommand};
 
     #[test]
     fn run_hook_with_succeeding_command_returns_ok() {
