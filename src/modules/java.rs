@@ -110,13 +110,21 @@ mod tests {
             installed: true,
             ..Default::default()
         };
-        assert!(JavaModule.is_installed(&pm, &Dependency::simple("java")).unwrap());
+        assert!(
+            JavaModule
+                .is_installed(&pm, &Dependency::simple("java"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn java_not_installed_when_pm_reports_false() {
         let pm = MockPackageManager::default();
-        assert!(!JavaModule.is_installed(&pm, &Dependency::simple("java")).unwrap());
+        assert!(
+            !JavaModule
+                .is_installed(&pm, &Dependency::simple("java"))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -125,7 +133,11 @@ mod tests {
             install_fails: true,
             ..Default::default()
         };
-        assert!(JavaModule.install(&pm, &Dependency::simple("java")).is_err());
+        assert!(
+            JavaModule
+                .install(&pm, &Dependency::simple("java"))
+                .is_err()
+        );
     }
 
     #[test]

@@ -120,7 +120,11 @@ impl Module for RubyModule {
         Ok(())
     }
 
-    fn resolved_version(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<Option<String>> {
+    fn resolved_version(
+        &self,
+        pm: &dyn PackageManager,
+        dep: &Dependency,
+    ) -> Result<Option<String>> {
         if pm.name() == "winget" {
             return pm.resolved_version(dep);
         }
@@ -150,7 +154,11 @@ mod tests {
             installed: true,
             ..Default::default()
         };
-        assert!(RubyModule.is_installed(&pm, &Dependency::simple("ruby")).unwrap());
+        assert!(
+            RubyModule
+                .is_installed(&pm, &Dependency::simple("ruby"))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -159,7 +167,11 @@ mod tests {
             name: "winget",
             ..Default::default()
         };
-        assert!(!RubyModule.is_installed(&pm, &Dependency::simple("ruby")).unwrap());
+        assert!(
+            !RubyModule
+                .is_installed(&pm, &Dependency::simple("ruby"))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -179,7 +191,11 @@ mod tests {
             install_fails: true,
             ..Default::default()
         };
-        assert!(RubyModule.install(&pm, &Dependency::simple("ruby")).is_err());
+        assert!(
+            RubyModule
+                .install(&pm, &Dependency::simple("ruby"))
+                .is_err()
+        );
     }
 
     #[test]
@@ -208,10 +224,7 @@ mod tests {
     #[test]
     fn ruby_post_setup_no_gemfile_is_noop() {
         // A temp dir with no Gemfile — post_setup must return Ok without running bundle.
-        let dir = std::env::temp_dir().join(format!(
-            "devy_ruby_test_{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("devy_ruby_test_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let dep = Dependency::simple("ruby");
         assert!(RubyModule.post_setup(&dep, &dir).is_ok());

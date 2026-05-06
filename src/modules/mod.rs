@@ -334,7 +334,6 @@ pub(super) fn node_pkg(pm: &dyn PackageManager) -> &'static str {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

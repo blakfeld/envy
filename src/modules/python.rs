@@ -155,13 +155,21 @@ mod tests {
             installed: true,
             ..Default::default()
         };
-        assert!(PythonModule.is_installed(&pm, &Dependency::simple("python")).unwrap());
+        assert!(
+            PythonModule
+                .is_installed(&pm, &Dependency::simple("python"))
+                .unwrap()
+        );
     }
 
     #[test]
     fn python_not_installed_when_pm_reports_false() {
         let pm = MockPackageManager::default();
-        assert!(!PythonModule.is_installed(&pm, &Dependency::simple("python")).unwrap());
+        assert!(
+            !PythonModule
+                .is_installed(&pm, &Dependency::simple("python"))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -170,7 +178,11 @@ mod tests {
             install_fails: true,
             ..Default::default()
         };
-        assert!(PythonModule.install(&pm, &Dependency::simple("python")).is_err());
+        assert!(
+            PythonModule
+                .install(&pm, &Dependency::simple("python"))
+                .is_err()
+        );
     }
 
     #[test]
@@ -182,10 +194,7 @@ mod tests {
     #[test]
     fn venv_path_custom_from_extra() {
         let mut extra = HashMap::new();
-        extra.insert(
-            "venv_path".into(),
-            serde_yaml::Value::String("venv".into()),
-        );
+        extra.insert("venv_path".into(), serde_yaml::Value::String("venv".into()));
         let dep = Dependency {
             name: "python".into(),
             version: None,
@@ -216,10 +225,7 @@ mod tests {
     fn post_setup_no_requirements_no_pyproject_is_noop() {
         // A temp dir with no requirements.txt or pyproject.toml and an existing
         // pyvenv.cfg — post_setup must return Ok without running pip.
-        let dir = std::env::temp_dir().join(format!(
-            "devy_python_test_{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("devy_python_test_{}", std::process::id()));
         let venv = dir.join(".venv");
         std::fs::create_dir_all(&venv).unwrap();
         std::fs::write(venv.join("pyvenv.cfg"), "").unwrap();
@@ -251,10 +257,7 @@ mod tests {
 
     #[test]
     fn detect_install_cmd_requirements_txt() {
-        let dir = std::env::temp_dir().join(format!(
-            "devy_python_cmd_{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("devy_python_cmd_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("requirements.txt"), "").unwrap();
 
@@ -267,10 +270,8 @@ mod tests {
 
     #[test]
     fn detect_install_cmd_pyproject_toml_preferred_over_requirements() {
-        let dir = std::env::temp_dir().join(format!(
-            "devy_python_pyproject_{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("devy_python_pyproject_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("pyproject.toml"), "").unwrap();
         std::fs::write(dir.join("requirements.txt"), "").unwrap();
@@ -278,7 +279,10 @@ mod tests {
         let dep = Dependency::simple("python");
         let venv = dir.join(".venv");
         let cmd = detect_install_cmd(&dep, &dir, &venv);
-        assert!(cmd.unwrap().contains("-e ."), "pyproject.toml must take priority");
+        assert!(
+            cmd.unwrap().contains("-e ."),
+            "pyproject.toml must take priority"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
