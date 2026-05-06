@@ -10,7 +10,6 @@ A declarative developer environment manager. Define your project's dependencies,
 - **Installs dependencies** via the platform package manager (languages, databases, CLIs, etc.)
 - **Starts services** like MySQL and Redis, and waits for them to be healthy
 - **Sets environment variables** persistently in your shell session via [shadowenv](https://shopify.github.io/shadowenv/)
-- **Decrypts secrets** from [ejson](https://github.com/Shopify/ejson) files and merges them into the environment
 - **Locks versions** in `devy.lock` so teammates get the same setup
 - **Runs project commands** defined in `devy.yml` (like `npm run dev`, `make test`, etc.)
 
