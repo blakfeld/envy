@@ -157,6 +157,19 @@ Stops all managed services.
 devy down
 ```
 
+### `devy services`, `devy start`, `devy stop`, `devy restart`
+
+Manage individual services without touching the rest of the environment. Use these when you want to control a single service — restart a database after a config change, stop something you don't need right now, or bring a service back up without re-running `devy up` for everything.
+
+```sh
+devy services        # List all services and their current running status
+devy start redis     # Start a service (skips if already running)
+devy stop redis      # Stop a service (skips if already stopped)
+devy restart mysql   # Stop then start a service, waiting for it to be healthy
+```
+
+Service names match what's defined under `dependencies:` in `devy.yml`.
+
 ### `devy status`
 
 Shows what is installed, what services are running, and what environment variables are set.

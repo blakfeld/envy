@@ -9,6 +9,121 @@ use crate::modules;
 use crate::output;
 use crate::package_manager::PackageManager;
 
+/// Renders the dependency status table and returns the number of issues found.
+/// Pass `bold_errors = true` when failures should be displayed in bold (check command).
+pub fn print_dep_table(
+    deps: &[Dependency],
+    pm: &dyn PackageManager,
+    bold_errors: bool,
+) -> Result<usize> {
+    let name_col = deps
+        .iter()
+        .map(|d| d.versioned_name().len())
+        .max()
+        .unwrap_or(0);
+    let status_col = "not installed".len();
+    let mut issues = 0usize;
+
+    for dep in deps {
+        let module = modules::get(&dep.name);
+        let name = dep.versioned_name();
+        let installed = module.is_installed(pm, dep)?;
+
+        let (icon, status) = if installed {
+            (
+                "✓".green().bold().to_string(),
+                "installed".green().to_string(),
+            )
+        } else {
+            issues += 1;
+            let txt = if bold_errors {
+                "not installed".red().bold().to_string()
+            } else {
+                "not installed".red().to_string()
+            };
+            ("✗".red().bold().to_string(), txt)
+        };
+
+        let service = if module.is_service() {
+            if !installed {
+                "–".dimmed().to_string()
+            } else if module.is_running(pm, dep)? {
+                format!("{} {}", "✓".green().bold(), "running".green())
+            } else {
+                issues += 1;
+                let txt = if bold_errors {
+                    "stopped".red().bold().to_string()
+                } else {
+                    "stopped".red().to_string()
+                };
+                format!("{} {}", "✗".red().bold(), txt)
+            }
+        } else {
+            "–".dimmed().to_string()
+        };
+
+        println!(
+            "  {}  {:<name_col$}  {:<status_col$}  {}",
+            icon, name, status, service
+        );
+    }
+
+    Ok(issues)
+}
+
+/// Renders the environment variable status table and returns the number of issues found.
+///
+/// When `bold_errors = true` (check command): shows ✓/✗ icons with "configured"/"missing" labels.
+/// When `bold_errors = false` (status command): shows each key with its current value.
+pub fn print_env_table(config_env: &HashMap<String, String>, bold_errors: bool) -> Result<usize> {
+    let mut issues = 0usize;
+    let written = shadowenv::read_vars(Path::new(shadowenv::ENV_FILE));
+    let key_col = config_env.keys().map(|k| k.len()).max().unwrap_or(0);
+
+    match written {
+        None if bold_errors => {
+            issues += config_env.len();
+            println!(
+                "  {}  environment not configured — run {}",
+                "✗".red().bold(),
+                "devy up".bold()
+            );
+        }
+        None => {
+            output::info("not configured — run devy up first");
+        }
+        Some(ref vars) if bold_errors => {
+            for key in config_env.keys() {
+                let (icon, value): (String, String) = if vars.contains_key(key) {
+                    (
+                        "✓".green().bold().to_string(),
+                        "configured".green().to_string(),
+                    )
+                } else {
+                    issues += 1;
+                    (
+                        "✗".red().bold().to_string(),
+                        "missing".red().bold().to_string(),
+                    )
+                };
+                println!("  {}  {:<key_col$}  {}", icon, key, value);
+            }
+        }
+        Some(vars) => {
+            for key in config_env.keys() {
+                let value = vars
+                    .get(key)
+                    .map(String::as_str)
+                    .unwrap_or("(not set)")
+                    .dimmed();
+                println!("  {:<key_col$}  {}", key, value);
+            }
+        }
+    }
+
+    Ok(issues)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,119 +252,4 @@ mod tests {
             "check mode issues ({check_issues}) must be >= status mode issues ({status_issues})"
         );
     }
-}
-
-/// Renders the dependency status table and returns the number of issues found.
-/// Pass `bold_errors = true` when failures should be displayed in bold (check command).
-pub fn print_dep_table(
-    deps: &[Dependency],
-    pm: &dyn PackageManager,
-    bold_errors: bool,
-) -> Result<usize> {
-    let name_col = deps
-        .iter()
-        .map(|d| d.versioned_name().len())
-        .max()
-        .unwrap_or(0);
-    let status_col = "not installed".len();
-    let mut issues = 0usize;
-
-    for dep in deps {
-        let module = modules::get(&dep.name);
-        let name = dep.versioned_name();
-        let installed = module.is_installed(pm, dep)?;
-
-        let (icon, status) = if installed {
-            (
-                "✓".green().bold().to_string(),
-                "installed".green().to_string(),
-            )
-        } else {
-            issues += 1;
-            let txt = if bold_errors {
-                "not installed".red().bold().to_string()
-            } else {
-                "not installed".red().to_string()
-            };
-            ("✗".red().bold().to_string(), txt)
-        };
-
-        let service = if module.is_service() {
-            if !installed {
-                "–".dimmed().to_string()
-            } else if module.is_running(pm, dep)? {
-                format!("{} {}", "✓".green().bold(), "running".green())
-            } else {
-                issues += 1;
-                let txt = if bold_errors {
-                    "stopped".red().bold().to_string()
-                } else {
-                    "stopped".red().to_string()
-                };
-                format!("{} {}", "✗".red().bold(), txt)
-            }
-        } else {
-            "–".dimmed().to_string()
-        };
-
-        println!(
-            "  {}  {:<name_col$}  {:<status_col$}  {}",
-            icon, name, status, service
-        );
-    }
-
-    Ok(issues)
-}
-
-/// Renders the environment variable status table and returns the number of issues found.
-///
-/// When `bold_errors = true` (check command): shows ✓/✗ icons with "configured"/"missing" labels.
-/// When `bold_errors = false` (status command): shows each key with its current value.
-pub fn print_env_table(config_env: &HashMap<String, String>, bold_errors: bool) -> Result<usize> {
-    let mut issues = 0usize;
-    let written = shadowenv::read_vars(Path::new(shadowenv::ENV_FILE));
-    let key_col = config_env.keys().map(|k| k.len()).max().unwrap_or(0);
-
-    match written {
-        None if bold_errors => {
-            issues += config_env.len();
-            println!(
-                "  {}  environment not configured — run {}",
-                "✗".red().bold(),
-                "devy up".bold()
-            );
-        }
-        None => {
-            output::info("not configured — run devy up first");
-        }
-        Some(ref vars) if bold_errors => {
-            for key in config_env.keys() {
-                let (icon, value): (String, String) = if vars.contains_key(key) {
-                    (
-                        "✓".green().bold().to_string(),
-                        "configured".green().to_string(),
-                    )
-                } else {
-                    issues += 1;
-                    (
-                        "✗".red().bold().to_string(),
-                        "missing".red().bold().to_string(),
-                    )
-                };
-                println!("  {}  {:<key_col$}  {}", icon, key, value);
-            }
-        }
-        Some(vars) => {
-            for key in config_env.keys() {
-                let value = vars
-                    .get(key)
-                    .map(String::as_str)
-                    .unwrap_or("(not set)")
-                    .dimmed();
-                println!("  {:<key_col$}  {}", key, value);
-            }
-        }
-    }
-
-    Ok(issues)
 }

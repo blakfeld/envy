@@ -167,11 +167,11 @@ mod tests {
 
     #[test]
     fn rustup_bin_path_contains_home() {
-        if let Ok(home) = std::env::var("HOME") {
-            if !home.is_empty() {
-                let bin = rustup_bin().unwrap();
-                assert!(bin.starts_with(&home));
-            }
+        if let Ok(home) = std::env::var("HOME")
+            && !home.is_empty()
+        {
+            let bin = rustup_bin().unwrap();
+            assert!(bin.starts_with(&home));
         }
     }
 

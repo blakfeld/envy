@@ -107,11 +107,11 @@ mod tests {
 
     #[test]
     fn bun_bin_path_contains_home() {
-        if let Ok(home) = std::env::var("HOME") {
-            if !home.is_empty() {
-                let bin = bun_bin().unwrap();
-                assert!(bin.starts_with(&home));
-            }
+        if let Ok(home) = std::env::var("HOME")
+            && !home.is_empty()
+        {
+            let bin = bun_bin().unwrap();
+            assert!(bin.starts_with(&home));
         }
     }
 
@@ -176,10 +176,10 @@ mod tests {
             return;
         }
         // Also skip if the bun_bin() path already exists (e.g. ~/.bun/bin/bun).
-        if let Some(p) = bun_bin() {
-            if std::path::Path::new(&p).exists() {
-                return;
-            }
+        if let Some(p) = bun_bin()
+            && std::path::Path::new(&p).exists()
+        {
+            return;
         }
         let pm = MockPackageManager::default();
         let dep = Dependency::simple("bun");
@@ -194,10 +194,10 @@ mod tests {
         if which("bun").is_ok() {
             return;
         }
-        if let Some(p) = bun_bin() {
-            if std::path::Path::new(&p).exists() {
-                return;
-            }
+        if let Some(p) = bun_bin()
+            && std::path::Path::new(&p).exists()
+        {
+            return;
         }
         let pm = MockPackageManager::default();
         let dep = Dependency::simple("bun");

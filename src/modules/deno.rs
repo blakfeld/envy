@@ -118,11 +118,11 @@ mod tests {
 
     #[test]
     fn deno_bin_path_contains_home() {
-        if let Ok(home) = std::env::var("HOME") {
-            if !home.is_empty() {
-                let bin = deno_bin().unwrap();
-                assert!(bin.starts_with(&home));
-            }
+        if let Ok(home) = std::env::var("HOME")
+            && !home.is_empty()
+        {
+            let bin = deno_bin().unwrap();
+            assert!(bin.starts_with(&home));
         }
     }
 
@@ -184,10 +184,10 @@ mod tests {
         if which("deno").is_ok() {
             return;
         }
-        if let Some(p) = deno_bin() {
-            if std::path::Path::new(&p).exists() {
-                return;
-            }
+        if let Some(p) = deno_bin()
+            && std::path::Path::new(&p).exists()
+        {
+            return;
         }
         let pm = MockPackageManager::default();
         let dep = Dependency::simple("deno");
@@ -202,10 +202,10 @@ mod tests {
         if which("deno").is_ok() {
             return;
         }
-        if let Some(p) = deno_bin() {
-            if std::path::Path::new(&p).exists() {
-                return;
-            }
+        if let Some(p) = deno_bin()
+            && std::path::Path::new(&p).exists()
+        {
+            return;
         }
         let pm = MockPackageManager::default();
         let dep = Dependency::simple("deno");
