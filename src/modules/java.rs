@@ -1,6 +1,5 @@
 use anyhow::Result;
 use std::collections::HashMap;
-use std::process::Command;
 
 use crate::config::Dependency;
 use crate::package_manager::PackageManager;
@@ -29,6 +28,7 @@ fn pkg_name(pm: &dyn PackageManager, dep: &Dependency) -> String {
 fn detect_java_home() -> Option<String> {
     #[cfg(target_os = "macos")]
     {
+        use std::process::Command;
         let out = Command::new("/usr/libexec/java_home").output().ok()?;
         if out.status.success() {
             let path = String::from_utf8(out.stdout).ok()?.trim().to_string();
@@ -45,12 +45,12 @@ fn detect_java_home() -> Option<String> {
             return Some("/usr/lib/jvm/default-java".into());
         }
         // Fall back to deriving JAVA_HOME from the `java` binary on PATH.
-        if let Ok(java) = which::which("java") {
-            if let Ok(resolved) = java.canonicalize() {
-                // java is typically at $JAVA_HOME/bin/java — go up two levels.
-                if let Some(home) = resolved.ancestors().nth(2) {
-                    return Some(home.display().to_string());
-                }
+        if let Ok(java) = which::which("java")
+            && let Ok(resolved) = java.canonicalize()
+        {
+            // java is typically at $JAVA_HOME/bin/java — go up two levels.
+            if let Some(home) = resolved.ancestors().nth(2) {
+                return Some(home.display().to_string());
             }
         }
         None
