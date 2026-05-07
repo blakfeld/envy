@@ -1,3 +1,5 @@
+pub(crate) mod helpers;
+
 mod bun;
 mod crystal;
 mod dart;
@@ -34,20 +36,49 @@ mod zig;
 use anyhow::{Context, Result};
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::process::Command;
 
 use crate::config::Dependency;
+use crate::output;
 use crate::package_manager::PackageManager;
+use helpers::{
+    PackageModule, extra_port, extra_strs, node_pkg, pm_dep, run_cmd, tcp_ping, write_mysql_config,
+};
 
-pub trait Module {
+pub struct ServiceConfig {
+    pub health_check_max_attempts: u32,
+    pub health_check_sleep_ms: u64,
+    pub shutdown_max_attempts: u32,
+    pub shutdown_sleep_ms: u64,
+}
+
+impl Default for ServiceConfig {
+    fn default() -> Self {
+        Self {
+            health_check_max_attempts: 10,
+            health_check_sleep_ms: 500,
+            shutdown_max_attempts: 10,
+            shutdown_sleep_ms: 500,
+        }
+    }
+}
+
+pub trait Module: Sync {
     /// Whether this module manages a background service.
     fn is_service(&self) -> bool {
         false
     }
 
+    /// The default TCP port this service listens on, if any.
+    /// Used by `check_port_conflicts` to detect conflicts even when `port` is not
+    /// explicitly set in devy.yml.
+    fn default_port(&self) -> Option<u16> {
+        None
+    }
+
     /// The install source recorded in devy.lock (e.g. "homebrew", "rustup").
-    fn source(&self) -> &'static str {
-        "homebrew"
+    /// Return `None` to derive the source from the active package manager name.
+    fn source(&self) -> Option<&'static str> {
+        None
     }
 
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool>;
@@ -60,7 +91,7 @@ pub trait Module {
     }
 
     fn is_running(&self, _pm: &dyn PackageManager, _dep: &Dependency) -> Result<bool> {
-        Ok(true)
+        Ok(false)
     }
 
     fn start(&self, _pm: &dyn PackageManager, _dep: &Dependency) -> Result<()> {
@@ -77,43 +108,101 @@ pub trait Module {
         Ok(())
     }
 
+    /// Timing and attempt configuration for health-check and shutdown polling.
+    /// Override `service_config()` for slow-starting or slow-stopping services.
+    fn service_config(&self) -> ServiceConfig {
+        ServiceConfig::default()
+    }
+
     /// Polls `health_check` until the service is ready or attempts are exhausted.
     fn wait_for_ready(&self, dep: &Dependency) -> Result<()> {
-        const MAX: u32 = 10;
-        const SLEEP_MS: u64 = 500;
-        for attempt in 1..=MAX {
+        let cfg = self.service_config();
+        let max = cfg.health_check_max_attempts;
+        if max == 0 {
+            anyhow::bail!(
+                "health_check_max_attempts returned 0 for '{}'; must be > 0",
+                dep.name
+            );
+        }
+        let sleep_ms = cfg.health_check_sleep_ms;
+        let mut last_err = anyhow::anyhow!("{} health check produced no error", dep.name);
+        for attempt in 1..=max {
             match self.health_check(dep) {
                 Ok(()) => return Ok(()),
-                Err(_) if attempt < MAX => {
-                    std::thread::sleep(std::time::Duration::from_millis(SLEEP_MS));
-                }
                 Err(e) => {
-                    return Err(e).with_context(|| {
-                        format!("{} did not become healthy after {MAX} attempts", dep.name)
-                    });
+                    last_err = e;
+                    if attempt < max {
+                        if attempt % 10 == 0 {
+                            output::step(&format!(
+                                "Still waiting for {} ({}/{})",
+                                dep.name, attempt, max
+                            ));
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
+                    }
                 }
             }
         }
-        Ok(())
+        Err(last_err)
+            .with_context(|| format!("{} did not become healthy after {max} attempts", dep.name))
+    }
+
+    /// Polls `is_running` until the service has stopped or attempts are exhausted.
+    fn wait_for_stopped(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<()> {
+        let cfg = self.service_config();
+        let max = cfg.shutdown_max_attempts;
+        if max == 0 {
+            anyhow::bail!(
+                "shutdown_max_attempts returned 0 for '{}'; must be > 0",
+                dep.name
+            );
+        }
+        let sleep_ms = cfg.shutdown_sleep_ms;
+        for attempt in 1..=max {
+            if !self.is_running(pm, dep)? {
+                return Ok(());
+            }
+            if attempt < max {
+                std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
+            }
+        }
+        anyhow::bail!("{} did not stop after {} attempts", dep.name, max)
     }
 
     /// Environment variables this module injects when active (e.g. SMTP_HOST, VAULT_ADDR).
     /// User-configured vars in devy.yml always take precedence over these defaults.
-    fn env_vars(&self, _dep: &Dependency) -> HashMap<String, String> {
+    fn env_vars(
+        &self,
+        _dep: &Dependency,
+        _project_root: &std::path::Path,
+    ) -> HashMap<String, String> {
         HashMap::new()
     }
 
     /// PATH entries to prepend when this module is active.
     /// Emitted as shadowenv `env/prepend-to-pathlist` directives so they compose
     /// correctly with the user's existing PATH.
-    fn path_prepends(&self, _dep: &Dependency) -> Vec<String> {
+    fn path_prepends(&self, _dep: &Dependency, _project_root: &std::path::Path) -> Vec<String> {
         vec![]
     }
 
-    /// Runs unconditionally after the install-or-skip decision, even when the
-    /// dependency already matched the lock file. Use for steps that must always
-    /// execute, such as `bundle install` or `pip install -r requirements.txt`.
-    fn post_setup(&self, _dep: &Dependency, _project_root: &std::path::Path) -> Result<()> {
+    /// The set of keys this module reads from `dep.extra`.
+    ///
+    /// `None` skips key checking (e.g. GenericModule accepts any key).
+    /// `Some(&[])` warns on any extra key (the default — correct for modules with no config).
+    /// `Some(&["port", ...])` declares a known-key allowlist.
+    fn known_extra_keys(&self) -> Option<&'static [&'static str]> {
+        Some(&[])
+    }
+
+    /// Called unconditionally after a dependency is installed or confirmed installed.
+    /// Implementations should be idempotent.
+    fn post_setup(
+        &self,
+        _dep: &Dependency,
+        _pm: &dyn PackageManager,
+        _project_root: &std::path::Path,
+    ) -> Result<()> {
         Ok(())
     }
 
@@ -126,218 +215,298 @@ pub trait Module {
     ) -> Result<Option<String>> {
         pm.resolved_version(dep)
     }
+
+    /// Returns informational warnings about the dependency's configuration.
+    /// Called by `devy check` before any installation to surface issues early.
+    /// Warnings are printed but do not count as blocking issues.
+    fn config_warnings(&self, _dep: &Dependency) -> Vec<String> {
+        vec![]
+    }
 }
+
+// ── Module statics ─────────────────────────────────────────────────────────────
+// Service modules
+static MYSQL: mysql::MysqlModule = mysql::MysqlModule;
+static REDIS: redis::RedisModule = redis::RedisModule;
+static POSTGRES: postgres::PostgresModule = postgres::PostgresModule;
+static MONGODB: mongodb::MongodbModule = mongodb::MongodbModule;
+static NGINX: nginx::NginxModule = nginx::NginxModule;
+static KAFKA: kafka::KafkaModule = kafka::KafkaModule;
+static RABBITMQ: rabbitmq::RabbitmqModule = rabbitmq::RabbitmqModule;
+static MEMCACHED: memcached::MemcachedModule = memcached::MemcachedModule;
+static ELASTICSEARCH: elasticsearch::ElasticsearchModule = elasticsearch::ElasticsearchModule;
+static OPENSEARCH: opensearch::OpenSearchModule = opensearch::OpenSearchModule;
+static MEILISEARCH: meilisearch::MeilisearchModule = meilisearch::MeilisearchModule;
+static MINIO: minio::MinioModule = minio::MinioModule;
+static MAILHOG: mailhog::MailhogModule = mailhog::MailhogModule;
+static MARIADB: mariadb::MariadbModule = mariadb::MariadbModule;
+static VAULT: vault::VaultModule = vault::VaultModule;
+// Language / runtime modules
+static RUST: rust::RustModule = rust::RustModule;
+static NODE: node::NodeModule = node::NodeModule;
+static TYPESCRIPT: typescript::TypeScriptModule = typescript::TypeScriptModule;
+static RUBY: ruby::RubyModule = ruby::RubyModule;
+static PYTHON: python::PythonModule = python::PythonModule;
+static JAVA: java::JavaModule = java::JavaModule;
+static KOTLIN: kotlin::KotlinModule = kotlin::KotlinModule;
+static ELIXIR: elixir::ElixirModule = elixir::ElixirModule;
+static ERLANG: erlang::ErlangModule = erlang::ErlangModule;
+static DENO: deno::DenoModule = deno::DenoModule;
+static BUN: bun::BunModule = bun::BunModule;
+static DOTNET: dotnet::DotnetModule = dotnet::DotnetModule;
+static DART: dart::DartModule = dart::DartModule;
+static ZIG: zig::ZigModule = zig::ZigModule;
+static CRYSTAL: crystal::CrystalModule = crystal::CrystalModule;
+static GCLOUD: gcloud::GcloudModule = gcloud::GcloudModule;
+static GENERIC: generic::GenericModule = generic::GenericModule;
+// Package modules (per-PM name tables)
+static GO: PackageModule = PackageModule {
+    default: "go",
+    apt: "golang-go",
+    winget: "GoLang.Go",
+};
+static SCALA: PackageModule = PackageModule {
+    default: "scala",
+    apt: "scala",
+    winget: "EPFL.Scala",
+};
+static PHP: PackageModule = PackageModule {
+    default: "php",
+    apt: "php",
+    winget: "PHP.PHP",
+};
+static AWSCLI: PackageModule = PackageModule {
+    default: "awscli",
+    apt: "awscli",
+    winget: "Amazon.AWSCLI",
+};
+static GH: PackageModule = PackageModule {
+    default: "gh",
+    apt: "gh",
+    winget: "GitHub.cli",
+};
+static KUBECTL: PackageModule = PackageModule {
+    default: "kubectl",
+    apt: "kubectl",
+    winget: "Kubernetes.kubectl",
+};
+static HELM: PackageModule = PackageModule {
+    default: "helm",
+    apt: "helm",
+    winget: "Helm.Helm",
+};
+static TERRAFORM: PackageModule = PackageModule {
+    default: "terraform",
+    apt: "terraform",
+    winget: "Hashicorp.Terraform",
+};
+static AZURE_CLI: PackageModule = PackageModule {
+    default: "azure-cli",
+    apt: "azure-cli",
+    winget: "Microsoft.AzureCLI",
+};
+static SWIFT: PackageModule = PackageModule {
+    default: "swift",
+    apt: "swift",
+    winget: "Swift.Toolchain",
+};
+
+/// Canonical-name → module registry. One entry per canonical name.
+/// Aliases (e.g. "postgres" → "postgresql") live in ALIASES below.
+/// Add a module here; adding it anywhere else is not required.
+pub(crate) static REGISTRY: &[(&str, &dyn Module)] = &[
+    // Services
+    ("mysql", &MYSQL),
+    ("redis", &REDIS),
+    ("postgresql", &POSTGRES),
+    ("mongodb", &MONGODB),
+    ("nginx", &NGINX),
+    ("kafka", &KAFKA),
+    ("rabbitmq", &RABBITMQ),
+    ("memcached", &MEMCACHED),
+    ("elasticsearch", &ELASTICSEARCH),
+    ("opensearch", &OPENSEARCH),
+    ("meilisearch", &MEILISEARCH),
+    ("minio", &MINIO),
+    ("mailhog", &MAILHOG),
+    ("mariadb", &MARIADB),
+    ("vault", &VAULT),
+    // Languages / runtimes
+    ("rust", &RUST),
+    ("node", &NODE),
+    ("typescript", &TYPESCRIPT),
+    ("ruby", &RUBY),
+    ("python", &PYTHON),
+    ("go", &GO),
+    ("java", &JAVA),
+    ("kotlin", &KOTLIN),
+    ("scala", &SCALA),
+    ("php", &PHP),
+    ("elixir", &ELIXIR),
+    ("erlang", &ERLANG),
+    ("deno", &DENO),
+    ("bun", &BUN),
+    ("dotnet", &DOTNET),
+    ("dart", &DART),
+    ("zig", &ZIG),
+    ("crystal", &CRYSTAL),
+    // CLI / infrastructure tools
+    ("awscli", &AWSCLI),
+    ("gh", &GH),
+    ("gcloud", &GCLOUD),
+    ("kubectl", &KUBECTL),
+    ("helm", &HELM),
+    ("terraform", &TERRAFORM),
+    ("azure-cli", &AZURE_CLI),
+    ("swift", &SWIFT),
+];
+
+/// Alias → canonical name. The canonical name must exist in REGISTRY.
+static ALIASES: &[(&str, &str)] = &[
+    // Service aliases
+    ("postgres", "postgresql"),
+    ("mongo", "mongodb"),
+    ("elastic", "elasticsearch"),
+    ("meili", "meilisearch"),
+    ("hashicorp-vault", "vault"),
+    // Language / runtime aliases
+    ("rustup", "rust"),
+    ("nodejs", "node"),
+    ("javascript", "node"),
+    ("js", "node"),
+    ("ts", "typescript"),
+    ("python3", "python"),
+    ("golang", "go"),
+    ("openjdk", "java"),
+    ("dotnet-sdk", "dotnet"),
+    ("csharp", "dotnet"),
+    // CLI aliases
+    ("aws", "awscli"),
+    ("aws-cli", "awscli"),
+    ("github-cli", "gh"),
+    ("google-cloud-sdk", "gcloud"),
+    ("kubernetes-cli", "kubectl"),
+    ("az", "azure-cli"),
+];
 
 /// Resolves a dependency name to its module, falling back to a generic install.
-pub fn get(name: &str) -> Box<dyn Module> {
-    match name {
-        // ── Services ──────────────────────────────────────────────────────────
-        "mysql" => Box::new(mysql::MysqlModule),
-        "redis" => Box::new(redis::RedisModule),
-        "postgresql" | "postgres" => Box::new(postgres::PostgresModule),
-        "mongodb" | "mongo" => Box::new(mongodb::MongodbModule),
-        "nginx" => Box::new(nginx::NginxModule),
-        "kafka" => Box::new(kafka::KafkaModule),
-        "rabbitmq" => Box::new(rabbitmq::RabbitmqModule),
-        "memcached" => Box::new(memcached::MemcachedModule),
-        "elasticsearch" | "elastic" => Box::new(elasticsearch::ElasticsearchModule),
-        "opensearch" => Box::new(opensearch::OpenSearchModule),
-        "meilisearch" | "meili" => Box::new(meilisearch::MeilisearchModule),
-        "minio" => Box::new(minio::MinioModule),
-        "mailhog" => Box::new(mailhog::MailhogModule),
-        "mariadb" => Box::new(mariadb::MariadbModule),
-        "vault" | "hashicorp-vault" => Box::new(vault::VaultModule),
-        // ── Languages / runtimes ──────────────────────────────────────────────
-        "rust" | "rustup" => Box::new(rust::RustModule),
-        "node" | "nodejs" | "javascript" | "js" => Box::new(node::NodeModule),
-        "typescript" | "ts" => Box::new(typescript::TypeScriptModule),
-        "ruby" => Box::new(ruby::RubyModule),
-        "python" | "python3" => Box::new(python::PythonModule),
-        "go" | "golang" => Box::new(PackageModule {
-            default: "go",
-            apt: "golang-go",
-            winget: "GoLang.Go",
-        }),
-        "java" | "openjdk" => Box::new(java::JavaModule),
-        "kotlin" => Box::new(kotlin::KotlinModule),
-        "scala" => Box::new(PackageModule {
-            default: "scala",
-            apt: "scala",
-            winget: "EPFL.Scala",
-        }),
-        "php" => Box::new(PackageModule {
-            default: "php",
-            apt: "php",
-            winget: "PHP.PHP",
-        }),
-        "elixir" => Box::new(elixir::ElixirModule),
-        "erlang" => Box::new(erlang::ErlangModule),
-        "deno" => Box::new(deno::DenoModule),
-        "bun" => Box::new(bun::BunModule),
-        "dotnet" | "dotnet-sdk" | "csharp" => Box::new(dotnet::DotnetModule),
-        "dart" => Box::new(dart::DartModule),
-        "zig" => Box::new(zig::ZigModule),
-        "crystal" => Box::new(crystal::CrystalModule),
-        // ── CLI / infrastructure tools ────────────────────────────────────────
-        "awscli" | "aws" | "aws-cli" => Box::new(PackageModule {
-            default: "awscli",
-            apt: "awscli",
-            winget: "Amazon.AWSCLI",
-        }),
-        "gh" | "github-cli" => Box::new(PackageModule {
-            default: "gh",
-            apt: "gh",
-            winget: "GitHub.cli",
-        }),
-        "gcloud" | "google-cloud-sdk" => Box::new(gcloud::GcloudModule),
-        "kubectl" | "kubernetes-cli" => Box::new(PackageModule {
-            default: "kubectl",
-            apt: "kubectl",
-            winget: "Kubernetes.kubectl",
-        }),
-        "helm" => Box::new(PackageModule {
-            default: "helm",
-            apt: "helm",
-            winget: "Helm.Helm",
-        }),
-        "terraform" => Box::new(PackageModule {
-            default: "terraform",
-            apt: "terraform",
-            winget: "Hashicorp.Terraform",
-        }),
-        "azure-cli" | "az" => Box::new(PackageModule {
-            default: "azure-cli",
-            apt: "azure-cli",
-            winget: "Microsoft.AzureCLI",
-        }),
-        "swift" => Box::new(PackageModule {
-            default: "swift",
-            apt: "swift",
-            winget: "Swift.Toolchain",
-        }),
-        _ => Box::new(generic::GenericModule),
-    }
+static REGISTRY_MAP: std::sync::LazyLock<HashMap<&'static str, &'static dyn Module>> =
+    std::sync::LazyLock::new(|| REGISTRY.iter().copied().collect());
+
+static ALIASES_MAP: std::sync::LazyLock<HashMap<&'static str, &'static str>> =
+    std::sync::LazyLock::new(|| ALIASES.iter().map(|&(a, t)| (a, t)).collect());
+
+pub fn get(name: &str) -> &'static dyn Module {
+    let canonical = ALIASES_MAP.get(name).copied().unwrap_or(name);
+    REGISTRY_MAP.get(canonical).copied().unwrap_or(&GENERIC)
 }
 
-/// A simple package install module with per-PM package names.
-/// Use for languages and tools that have no special install logic beyond `install_package`.
-struct PackageModule {
-    default: &'static str,
-    apt: &'static str,
-    winget: &'static str,
-}
-
-impl PackageModule {
-    fn name_for(&self, pm: &dyn PackageManager) -> &'static str {
-        match pm.name() {
-            "apt" => self.apt,
-            "winget" => self.winget,
-            _ => self.default,
-        }
-    }
-}
-
-impl Module for PackageModule {
-    fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
-        pm.is_package_installed(&pm_dep(dep, self.name_for(pm)))
-    }
-
-    fn install(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<()> {
-        pm.install_package(&pm_dep(dep, self.name_for(pm)))
-    }
-}
-
-// ── Shared helpers ────────────────────────────────────────────────────────────
-
-/// Writes a `my.cnf` snippet for MySQL-compatible services (MySQL and MariaDB share the same
-/// config format). Creates the directory if absent.
-pub(super) fn write_mysql_config(
-    config_dir: &std::path::Path,
-    port: u16,
-    cli_args: Option<&str>,
-) -> anyhow::Result<()> {
-    std::fs::create_dir_all(config_dir)
-        .with_context(|| format!("Failed to create config dir {}", config_dir.display()))?;
-
-    let mut ini = format!("[mysqld]\nport = {}\n", port);
-    if let Some(args) = cli_args {
-        for arg in args.split_whitespace() {
-            // Require the -- prefix so bare key=value tokens can't inject directives.
-            let Some(rest) = arg.strip_prefix("--") else {
-                continue;
-            };
-            let Some((key, val)) = rest.split_once('=') else {
-                continue;
-            };
-            // Keys must be safe ini identifiers: alphanumeric, hyphens, underscores.
-            if !key
-                .chars()
-                .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
-            {
-                continue;
-            }
-            // Values must not contain newlines or null bytes (would break ini structure).
-            if val.contains('\n') || val.contains('\0') {
-                continue;
-            }
-            ini.push_str(&format!("{} = {}\n", key, val));
-        }
-    }
-
-    std::fs::write(config_dir.join("my.cnf"), ini).context("Failed to write my.cnf")?;
-    Ok(())
-}
-
-/// Runs a command, inheriting stdio, and bails on non-zero exit.
-pub(super) fn run_cmd(prog: &str, args: &[&str]) -> Result<()> {
-    let status = Command::new(prog)
-        .args(args)
-        .status()
-        .with_context(|| format!("failed to start `{prog}`"))?;
-    if !status.success() {
-        anyhow::bail!("`{prog} {}` failed", args.join(" "));
-    }
-    Ok(())
-}
-
-/// Reads a YAML sequence of strings from dep.extra.
-pub(super) fn extra_strs(dep: &Dependency, key: &str) -> Vec<String> {
-    dep.extra
-        .get(key)
-        .and_then(|v| v.as_sequence())
-        .map(|seq| {
-            seq.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Returns a copy of `dep` with the name replaced by the platform-appropriate package name.
-pub(super) fn pm_dep(dep: &Dependency, name: &str) -> Dependency {
-    Dependency {
-        name: name.to_string(),
-        version: dep.version.clone(),
-        tap: dep.tap.clone(),
-        after_install: dep.after_install.clone(),
-        extra: dep.extra.clone(),
-    }
-}
-
-/// Returns the platform-appropriate package name for Node.js.
-/// Shared between NodeModule and TypeScriptModule.
-pub(super) fn node_pkg(pm: &dyn PackageManager) -> &'static str {
-    match pm.name() {
-        "apt" => "nodejs",
-        "winget" => "OpenJS.NodeJS",
-        _ => "node",
-    }
+/// Returns the canonical registry name for `name`, resolving aliases.
+/// `"postgres"` → `"postgresql"`, `"js"` → `"node"`, unknown → unchanged.
+pub fn canonical_name(name: &str) -> &str {
+    ALIASES_MAP.get(name).copied().unwrap_or(name)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    // ── registry integrity ────────────────────────────────────────────────────
+
+    #[test]
+    fn registry_names_are_unique() {
+        let mut names: Vec<&str> = REGISTRY.iter().map(|(n, _)| *n).collect();
+        names.sort_unstable();
+        for w in names.windows(2) {
+            assert_ne!(w[0], w[1], "REGISTRY contains duplicate name '{}'", w[0]);
+        }
+    }
+
+    #[test]
+    fn alias_targets_exist_in_registry() {
+        let canonical_names: std::collections::HashSet<&str> =
+            REGISTRY.iter().map(|(n, _)| *n).collect();
+        for (alias, canon) in ALIASES {
+            assert!(
+                canonical_names.contains(canon),
+                "ALIASES: '{}' → '{}' but '{}' is not in REGISTRY",
+                alias,
+                canon,
+                canon
+            );
+        }
+    }
+
+    #[test]
+    fn alias_names_do_not_shadow_registry_names() {
+        let canonical_names: std::collections::HashSet<&str> =
+            REGISTRY.iter().map(|(n, _)| *n).collect();
+        for (alias, _) in ALIASES {
+            assert!(
+                !canonical_names.contains(alias),
+                "ALIASES entry '{}' shadows a REGISTRY canonical name",
+                alias
+            );
+        }
+    }
+
+    // ── extra_port ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn extra_port_returns_default_when_key_absent() {
+        let dep = Dependency::simple("redis");
+        assert_eq!(extra_port(&dep, "port", 6379).unwrap(), 6379);
+    }
+
+    #[test]
+    fn extra_port_returns_custom_value() {
+        let mut extra = HashMap::new();
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(6380u64.into()),
+        );
+        let dep = Dependency::with_extra("redis", extra);
+        assert_eq!(extra_port(&dep, "port", 6379).unwrap(), 6380);
+    }
+
+    #[test]
+    fn extra_port_bails_on_overflow() {
+        let mut extra = HashMap::new();
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(99999u64.into()),
+        );
+        let dep = Dependency::with_extra("redis", extra);
+        assert!(extra_port(&dep, "port", 6379).is_err());
+    }
+
+    #[test]
+    fn extra_port_bails_on_zero() {
+        let mut extra = HashMap::new();
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(0u64.into()),
+        );
+        let dep = Dependency::with_extra("redis", extra);
+        let err = extra_port(&dep, "port", 6379).unwrap_err();
+        assert!(
+            err.to_string().contains("out of range"),
+            "error must say 'out of range' for port 0"
+        );
+    }
+
+    #[test]
+    fn extra_port_uses_provided_key_name() {
+        let mut extra = HashMap::new();
+        extra.insert(
+            "smtp_port".into(),
+            crate::config::ExtraValue::Number(1025u64.into()),
+        );
+        let dep = Dependency::with_extra("mailhog", extra);
+        assert_eq!(extra_port(&dep, "smtp_port", 1025).unwrap(), 1025);
+        assert_eq!(extra_port(&dep, "port", 80).unwrap(), 80); // different key → default
+    }
 
     // ── get ───────────────────────────────────────────────────────────────────
 
@@ -433,12 +602,12 @@ mod tests {
 
     #[test]
     fn get_deno_source_is_deno_installer() {
-        assert_eq!(get("deno").source(), "deno-installer");
+        assert_eq!(get("deno").source(), Some("deno-installer"));
     }
 
     #[test]
     fn get_bun_source_is_bun_installer() {
-        assert_eq!(get("bun").source(), "bun-installer");
+        assert_eq!(get("bun").source(), Some("bun-installer"));
     }
 
     #[test]
@@ -479,8 +648,8 @@ mod tests {
 
     #[test]
     fn get_gcloud_source_is_gcloud_installer() {
-        assert_eq!(get("gcloud").source(), "gcloud-installer");
-        assert_eq!(get("google-cloud-sdk").source(), "gcloud-installer");
+        assert_eq!(get("gcloud").source(), Some("gcloud-installer"));
+        assert_eq!(get("google-cloud-sdk").source(), Some("gcloud-installer"));
     }
 
     #[test]
@@ -509,8 +678,8 @@ mod tests {
 
     #[test]
     fn get_rust_source_is_rustup() {
-        assert_eq!(get("rust").source(), "rustup");
-        assert_eq!(get("rustup").source(), "rustup");
+        assert_eq!(get("rust").source(), Some("rustup"));
+        assert_eq!(get("rustup").source(), Some("rustup"));
     }
 
     #[test]
@@ -546,7 +715,7 @@ mod tests {
     fn get_unknown_falls_back_to_generic() {
         let m = get("somerandompkg");
         assert!(!m.is_service());
-        assert_eq!(m.source(), "homebrew");
+        assert_eq!(m.source(), None);
     }
 
     // ── get() match arm identity tests ───────────────────────────────────────
@@ -582,8 +751,8 @@ mod tests {
 
     #[test]
     fn get_ruby_routes_to_ruby_module() {
-        // RubyModule.source() returns "rbenv", which GenericModule does not.
-        assert_eq!(get("ruby").source(), "rbenv");
+        // RubyModule.source() returns Some("rbenv"), which GenericModule does not.
+        assert_eq!(get("ruby").source(), Some("rbenv"));
     }
 
     #[test]
@@ -818,9 +987,9 @@ mod tests {
         let mut extra = HashMap::new();
         extra.insert(
             "global_packages".to_string(),
-            serde_yaml::Value::Sequence(vec![
-                serde_yaml::Value::String("typescript".into()),
-                serde_yaml::Value::String("eslint".into()),
+            crate::config::ExtraValue::Sequence(vec![
+                crate::config::ExtraValue::String("typescript".into()),
+                crate::config::ExtraValue::String("eslint".into()),
             ]),
         );
         let dep = Dependency {
@@ -828,6 +997,7 @@ mod tests {
             version: None,
             tap: None,
             after_install: None,
+            shell: None,
             extra,
         };
         let pkgs = extra_strs(&dep, "global_packages");
@@ -839,13 +1009,14 @@ mod tests {
         let mut extra = HashMap::new();
         extra.insert(
             "global_packages".to_string(),
-            serde_yaml::Value::String("ts".into()),
+            crate::config::ExtraValue::String("ts".into()),
         );
         let dep = Dependency {
             name: "node".into(),
             version: None,
             tap: None,
             after_install: None,
+            shell: None,
             extra,
         };
         assert!(extra_strs(&dep, "global_packages").is_empty());
@@ -860,6 +1031,7 @@ mod tests {
             version: Some("3.2".into()),
             tap: Some("homebrew/core".into()),
             after_install: None,
+            shell: None,
             extra: HashMap::new(),
         };
         let remapped = pm_dep(&dep, "ruby@3.2");
@@ -911,16 +1083,20 @@ mod tests {
     }
 
     #[test]
-    fn default_is_running_returns_true() {
+    fn default_is_running_returns_false() {
         let pm = crate::package_manager::MockPackageManager::default();
         let dep = Dependency::simple("test");
-        assert!(DefaultModule.is_running(&pm, &dep).unwrap());
+        assert!(!DefaultModule.is_running(&pm, &dep).unwrap());
     }
 
     #[test]
     fn default_env_vars_returns_empty_map() {
         let dep = Dependency::simple("test");
-        assert!(DefaultModule.env_vars(&dep).is_empty());
+        assert!(
+            DefaultModule
+                .env_vars(&dep, std::path::Path::new("/tmp"))
+                .is_empty()
+        );
     }
 
     #[test]
@@ -964,12 +1140,53 @@ mod tests {
         fn health_check(&self, _: &Dependency) -> Result<()> {
             Ok(())
         }
+        fn service_config(&self) -> ServiceConfig {
+            ServiceConfig {
+                health_check_sleep_ms: 0,
+                ..Default::default()
+            }
+        }
     }
 
     #[test]
     fn wait_for_ready_succeeds_immediately_when_healthy() {
         let dep = Dependency::simple("testservice");
         HealthyModule.wait_for_ready(&dep).unwrap();
+    }
+
+    struct ZeroAttemptsModule;
+    impl Module for ZeroAttemptsModule {
+        fn is_installed(
+            &self,
+            _: &dyn crate::package_manager::PackageManager,
+            _: &Dependency,
+        ) -> Result<bool> {
+            Ok(true)
+        }
+        fn install(
+            &self,
+            _: &dyn crate::package_manager::PackageManager,
+            _: &Dependency,
+        ) -> Result<()> {
+            Ok(())
+        }
+        fn service_config(&self) -> ServiceConfig {
+            ServiceConfig {
+                health_check_max_attempts: 0,
+                ..Default::default()
+            }
+        }
+    }
+
+    #[test]
+    fn wait_for_ready_returns_err_when_max_attempts_is_zero() {
+        let dep = Dependency::simple("zeroservice");
+        let result = ZeroAttemptsModule.wait_for_ready(&dep);
+        assert!(
+            result.is_err(),
+            "must return Err (not panic) when max_attempts is 0"
+        );
+        assert!(result.unwrap_err().to_string().contains("zeroservice"));
     }
 
     struct SickModule;
@@ -991,6 +1208,12 @@ mod tests {
         fn health_check(&self, _: &Dependency) -> Result<()> {
             anyhow::bail!("not healthy")
         }
+        fn service_config(&self) -> ServiceConfig {
+            ServiceConfig {
+                health_check_sleep_ms: 0,
+                ..Default::default()
+            }
+        }
     }
 
     #[test]
@@ -1002,7 +1225,7 @@ mod tests {
     }
 
     struct EventuallyHealthyModule {
-        calls: std::cell::Cell<u32>,
+        calls: std::sync::atomic::AtomicU32,
         fail_for: u32,
     }
     impl Module for EventuallyHealthyModule {
@@ -1021,12 +1244,19 @@ mod tests {
             Ok(())
         }
         fn health_check(&self, _: &Dependency) -> Result<()> {
-            let n = self.calls.get();
-            self.calls.set(n + 1);
+            let n = self
+                .calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if n < self.fail_for {
                 anyhow::bail!("not ready yet")
             } else {
                 Ok(())
+            }
+        }
+        fn service_config(&self) -> ServiceConfig {
+            ServiceConfig {
+                health_check_sleep_ms: 0,
+                ..Default::default()
             }
         }
     }
@@ -1034,12 +1264,186 @@ mod tests {
     #[test]
     fn wait_for_ready_retries_until_healthy() {
         let m = EventuallyHealthyModule {
-            calls: std::cell::Cell::new(0),
+            calls: std::sync::atomic::AtomicU32::new(0),
             fail_for: 2,
         };
         let dep = Dependency::simple("eventually");
         m.wait_for_ready(&dep).unwrap();
-        assert!(m.calls.get() >= 3, "Expected at least 3 health_check calls");
+        assert!(
+            m.calls.load(std::sync::atomic::Ordering::Relaxed) >= 3,
+            "Expected at least 3 health_check calls"
+        );
+    }
+
+    // ── wait_for_stopped ─────────────────────────────────────────────────────
+
+    struct AlreadyStoppedModule;
+    impl Module for AlreadyStoppedModule {
+        fn is_installed(
+            &self,
+            _: &dyn crate::package_manager::PackageManager,
+            _: &Dependency,
+        ) -> Result<bool> {
+            Ok(true)
+        }
+        fn install(
+            &self,
+            _: &dyn crate::package_manager::PackageManager,
+            _: &Dependency,
+        ) -> Result<()> {
+            Ok(())
+        }
+        fn is_running(
+            &self,
+            _pm: &dyn crate::package_manager::PackageManager,
+            _dep: &Dependency,
+        ) -> Result<bool> {
+            Ok(false)
+        }
+        fn service_config(&self) -> ServiceConfig {
+            ServiceConfig {
+                shutdown_sleep_ms: 0,
+                ..Default::default()
+            }
+        }
+    }
+
+    #[test]
+    fn wait_for_stopped_returns_ok_when_already_stopped() {
+        let pm = crate::package_manager::MockPackageManager::default();
+        let dep = Dependency::simple("stoppedservice");
+        AlreadyStoppedModule.wait_for_stopped(&pm, &dep).unwrap();
+    }
+
+    struct NeverStopsModule;
+    impl Module for NeverStopsModule {
+        fn is_installed(
+            &self,
+            _: &dyn crate::package_manager::PackageManager,
+            _: &Dependency,
+        ) -> Result<bool> {
+            Ok(true)
+        }
+        fn install(
+            &self,
+            _: &dyn crate::package_manager::PackageManager,
+            _: &Dependency,
+        ) -> Result<()> {
+            Ok(())
+        }
+        fn is_running(
+            &self,
+            _pm: &dyn crate::package_manager::PackageManager,
+            _dep: &Dependency,
+        ) -> Result<bool> {
+            Ok(true)
+        }
+        fn service_config(&self) -> ServiceConfig {
+            ServiceConfig {
+                shutdown_sleep_ms: 0,
+                ..Default::default()
+            }
+        }
+    }
+
+    #[test]
+    fn wait_for_stopped_fails_after_max_attempts() {
+        let pm = crate::package_manager::MockPackageManager::default();
+        let dep = Dependency::simple("stubborn");
+        let err = NeverStopsModule.wait_for_stopped(&pm, &dep).unwrap_err();
+        assert!(
+            err.to_string().contains("stubborn"),
+            "error must name the service"
+        );
+        assert!(
+            err.to_string().contains("10 attempts"),
+            "error must mention attempt count"
+        );
+    }
+
+    struct EventuallyStopsModule {
+        calls: std::sync::atomic::AtomicU32,
+        stop_after: u32,
+    }
+    impl Module for EventuallyStopsModule {
+        fn is_installed(
+            &self,
+            _: &dyn crate::package_manager::PackageManager,
+            _: &Dependency,
+        ) -> Result<bool> {
+            Ok(true)
+        }
+        fn install(
+            &self,
+            _: &dyn crate::package_manager::PackageManager,
+            _: &Dependency,
+        ) -> Result<()> {
+            Ok(())
+        }
+        fn is_running(
+            &self,
+            _pm: &dyn crate::package_manager::PackageManager,
+            _dep: &Dependency,
+        ) -> Result<bool> {
+            let n = self
+                .calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(n < self.stop_after)
+        }
+        fn service_config(&self) -> ServiceConfig {
+            ServiceConfig {
+                shutdown_sleep_ms: 0,
+                ..Default::default()
+            }
+        }
+    }
+
+    #[test]
+    fn wait_for_stopped_retries_until_stopped() {
+        let pm = crate::package_manager::MockPackageManager::default();
+        let m = EventuallyStopsModule {
+            calls: std::sync::atomic::AtomicU32::new(0),
+            stop_after: 2,
+        };
+        let dep = Dependency::simple("slowstopper");
+        m.wait_for_stopped(&pm, &dep).unwrap();
+        assert!(m.calls.load(std::sync::atomic::Ordering::Relaxed) >= 3);
+    }
+
+    struct ZeroShutdownModule;
+    impl Module for ZeroShutdownModule {
+        fn is_installed(
+            &self,
+            _: &dyn crate::package_manager::PackageManager,
+            _: &Dependency,
+        ) -> Result<bool> {
+            Ok(true)
+        }
+        fn install(
+            &self,
+            _: &dyn crate::package_manager::PackageManager,
+            _: &Dependency,
+        ) -> Result<()> {
+            Ok(())
+        }
+        fn service_config(&self) -> ServiceConfig {
+            ServiceConfig {
+                shutdown_max_attempts: 0,
+                ..Default::default()
+            }
+        }
+    }
+
+    #[test]
+    fn wait_for_stopped_returns_err_when_max_attempts_is_zero() {
+        let pm = crate::package_manager::MockPackageManager::default();
+        let dep = Dependency::simple("zeroservice");
+        let result = ZeroShutdownModule.wait_for_stopped(&pm, &dep);
+        assert!(
+            result.is_err(),
+            "must return Err (not silent bail) when shutdown_max_attempts is 0"
+        );
+        assert!(result.unwrap_err().to_string().contains("zeroservice"));
     }
 
     // ── node_pkg ──────────────────────────────────────────────────────────────
@@ -1160,18 +1564,19 @@ mod tests {
     // ── write_mysql_config ────────────────────────────────────────────────────
 
     fn write_and_read(port: u16, cli_args: Option<&str>) -> String {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static N: AtomicU64 = AtomicU64::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "devy_mysql_sec_{}_{}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::tmp_dir();
         write_mysql_config(&dir, port, cli_args).unwrap();
-        let content = std::fs::read_to_string(dir.join("my.cnf")).unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
-        content
+        std::fs::read_to_string(dir.join("my.cnf")).unwrap()
+        // dir is dropped here, cleaning up automatically
+    }
+
+    /// Like `write_and_read` but also returns the number of warnings emitted.
+    fn write_and_read_with_warnings(port: u16, cli_args: Option<&str>) -> (String, usize) {
+        let mut content = String::new();
+        let warn_count = crate::output::with_warn_capture(|| {
+            content = write_and_read(port, cli_args);
+        });
+        (content, warn_count)
     }
 
     #[test]
@@ -1188,29 +1593,30 @@ mod tests {
 
     #[test]
     fn write_mysql_config_rejects_bare_key_value_without_double_dash() {
-        // Without --, the token should be silently skipped.
-        let content = write_and_read(3306, Some("skip_grant_tables=1"));
+        let (content, warns) = write_and_read_with_warnings(3306, Some("skip_grant_tables=1"));
         assert!(!content.contains("skip_grant_tables"));
+        assert!(warns > 0, "must warn when -- prefix is missing");
     }
 
     #[test]
     fn write_mysql_config_rejects_key_with_special_chars() {
-        // A key with characters outside [a-zA-Z0-9_-] must be dropped.
-        let content = write_and_read(3306, Some("--bad;key=val"));
+        let (content, warns) = write_and_read_with_warnings(3306, Some("--bad;key=val"));
         assert!(!content.contains("bad;key"));
+        assert!(warns > 0, "must warn when key contains unsafe characters");
     }
 
     #[test]
     fn write_mysql_config_skips_args_without_equals() {
-        let content = write_and_read(3306, Some("--no-value-here"));
+        let (content, warns) = write_and_read_with_warnings(3306, Some("--no-value-here"));
         assert!(!content.contains("no-value-here"));
+        assert!(warns > 0, "must warn when no = is present in arg");
     }
 
     #[test]
     fn write_mysql_config_treats_newline_in_args_as_separator() {
         // \n is whitespace — split_whitespace splits the arg list on it.
-        // The token "line2" has no "--" prefix and is skipped; "--key=value" is written normally.
-        let content = write_and_read(3306, Some("--key=value\nline2"));
+        // "--key=value" is valid and written; "line2" has no -- prefix and warns.
+        let (content, warns) = write_and_read_with_warnings(3306, Some("--key=value\nline2"));
         assert!(
             content.contains("key = value"),
             "Expected valid arg to be written"
@@ -1219,12 +1625,27 @@ mod tests {
             !content.contains("line2"),
             "Bare token after newline must be skipped"
         );
+        assert!(warns > 0, "must warn for the bare 'line2' token");
     }
 
     #[test]
     fn write_mysql_config_rejects_value_with_null_byte() {
-        let content = write_and_read(3306, Some("--key=val\x00ue"));
+        let (content, warns) = write_and_read_with_warnings(3306, Some("--key=val\x00ue"));
         assert!(!content.contains("val"));
+        assert!(warns > 0, "must warn when value contains null byte");
+    }
+
+    #[test]
+    fn write_mysql_config_carriage_return_splits_token() {
+        // \r is ASCII whitespace; split_whitespace splits "--key=val\rue" into
+        // "--key=val" (accepted) and "ue" (no -- prefix, dropped with a warning).
+        let (content, warns) = write_and_read_with_warnings(3306, Some("--key=val\rue"));
+        assert!(
+            content.contains("key = val"),
+            "portion before \\r is accepted"
+        );
+        assert!(!content.contains("ue"), "portion after \\r is dropped");
+        assert!(warns > 0, "must warn for the bare 'ue' token");
     }
 
     #[test]

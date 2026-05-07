@@ -16,16 +16,19 @@ fn package_name(pm: &dyn PackageManager) -> &'static str {
     }
 }
 
-fn port(dep: &Dependency) -> u16 {
-    dep.extra
-        .get("port")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(9200) as u16
+fn port(dep: &Dependency) -> anyhow::Result<u16> {
+    super::extra_port(dep, "port", 9200)
 }
 
 impl Module for ElasticsearchModule {
     fn is_service(&self) -> bool {
         true
+    }
+    fn default_port(&self) -> Option<u16> {
+        Some(9200)
+    }
+    fn known_extra_keys(&self) -> Option<&'static [&'static str]> {
+        Some(&["port"])
     }
 
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
@@ -48,19 +51,26 @@ impl Module for ElasticsearchModule {
         pm.stop_service(&self.service_name(dep))
     }
 
+    fn service_config(&self) -> super::ServiceConfig {
+        super::ServiceConfig {
+            health_check_max_attempts: 120,
+            ..Default::default()
+        }
+    }
+
     fn health_check(&self, dep: &Dependency) -> Result<()> {
-        let p = port(dep);
+        let p = port(dep)?;
         let url = format!("http://127.0.0.1:{p}/");
         let response = ureq::get(&url)
             .timeout(std::time::Duration::from_secs(2))
             .call()
             .with_context(|| format!("Elasticsearch not reachable on port {p}"))?;
-        let body: serde_json::Value = response
+        let body: ureq::serde_json::Value = response
             .into_json()
             .with_context(|| "Elasticsearch returned non-JSON response")?;
         let status = body
             .pointer("/status")
-            .and_then(|v: &serde_json::Value| v.as_str())
+            .and_then(|v: &ureq::serde_json::Value| v.as_str())
             .unwrap_or("");
         classify_status(status)
     }
@@ -88,12 +98,16 @@ mod tests {
 
     fn dep_with_port(port: u64) -> Dependency {
         let mut extra = HashMap::new();
-        extra.insert("port".into(), serde_yaml::Value::Number(port.into()));
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(port.into()),
+        );
         Dependency {
             name: "elasticsearch".into(),
             version: None,
             tap: None,
             after_install: None,
+            shell: None,
             extra,
         }
     }
@@ -106,13 +120,19 @@ mod tests {
     #[test]
     fn port_defaults_to_9200() {
         let dep = Dependency::simple("elasticsearch");
-        assert_eq!(port(&dep), 9200);
+        assert_eq!(port(&dep).unwrap(), 9200);
     }
 
     #[test]
     fn port_reads_custom_value() {
         let dep = dep_with_port(9201);
-        assert_eq!(port(&dep), 9201);
+        assert_eq!(port(&dep).unwrap(), 9201);
+    }
+
+    #[test]
+    fn port_bails_on_out_of_range() {
+        let dep = dep_with_port(99999);
+        assert!(port(&dep).is_err());
     }
 
     #[test]

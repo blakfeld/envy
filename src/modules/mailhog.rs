@@ -17,16 +17,19 @@ fn package_name(pm: &dyn PackageManager) -> &'static str {
     }
 }
 
-fn smtp_port(dep: &Dependency) -> u16 {
-    dep.extra
-        .get("smtp_port")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(1025) as u16
+fn smtp_port(dep: &Dependency) -> anyhow::Result<u16> {
+    super::extra_port(dep, "smtp_port", 1025)
 }
 
 impl Module for MailhogModule {
     fn is_service(&self) -> bool {
         true
+    }
+    fn default_port(&self) -> Option<u16> {
+        Some(1025)
+    }
+    fn known_extra_keys(&self) -> Option<&'static [&'static str]> {
+        Some(&["smtp_port"])
     }
 
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
@@ -50,15 +53,19 @@ impl Module for MailhogModule {
     }
 
     fn health_check(&self, dep: &Dependency) -> Result<()> {
-        let p = smtp_port(dep);
+        let p = smtp_port(dep)?;
         let addr: SocketAddr = format!("127.0.0.1:{p}").parse()?;
         TcpStream::connect_timeout(&addr, Duration::from_secs(1))
             .with_context(|| format!("MailHog SMTP not accepting connections on port {p}"))?;
         Ok(())
     }
 
-    fn env_vars(&self, dep: &Dependency) -> HashMap<String, String> {
-        let p = smtp_port(dep);
+    fn env_vars(
+        &self,
+        dep: &Dependency,
+        _project_root: &std::path::Path,
+    ) -> HashMap<String, String> {
+        let p = smtp_port(dep).unwrap_or(1025);
         let mut vars = HashMap::new();
         vars.insert("SMTP_HOST".into(), "127.0.0.1".into());
         vars.insert("SMTP_PORT".into(), p.to_string());
@@ -73,7 +80,10 @@ mod tests {
 
     fn dep_with_smtp_port(port: u64) -> Dependency {
         let mut extra = HashMap::new();
-        extra.insert("smtp_port".into(), serde_yaml::Value::Number(port.into()));
+        extra.insert(
+            "smtp_port".into(),
+            crate::config::ExtraValue::Number(port.into()),
+        );
         Dependency::with_extra("mailhog", extra)
     }
 
@@ -85,13 +95,19 @@ mod tests {
     #[test]
     fn smtp_port_defaults_to_1025() {
         let dep = Dependency::simple("mailhog");
-        assert_eq!(smtp_port(&dep), 1025);
+        assert_eq!(smtp_port(&dep).unwrap(), 1025);
     }
 
     #[test]
     fn smtp_port_reads_custom_value() {
         let dep = dep_with_smtp_port(1026);
-        assert_eq!(smtp_port(&dep), 1026);
+        assert_eq!(smtp_port(&dep).unwrap(), 1026);
+    }
+
+    #[test]
+    fn smtp_port_bails_on_out_of_range() {
+        let dep = dep_with_smtp_port(99999);
+        assert!(smtp_port(&dep).is_err());
     }
 
     #[test]
@@ -104,7 +120,7 @@ mod tests {
     #[test]
     fn env_vars_includes_smtp_host_and_default_port() {
         let dep = Dependency::simple("mailhog");
-        let vars = MailhogModule.env_vars(&dep);
+        let vars = MailhogModule.env_vars(&dep, std::path::Path::new("/tmp"));
         assert_eq!(vars.get("SMTP_HOST").map(|s| s.as_str()), Some("127.0.0.1"));
         assert_eq!(vars.get("SMTP_PORT").map(|s| s.as_str()), Some("1025"));
     }
@@ -112,7 +128,7 @@ mod tests {
     #[test]
     fn env_vars_reflects_custom_smtp_port() {
         let dep = dep_with_smtp_port(2525);
-        let vars = MailhogModule.env_vars(&dep);
+        let vars = MailhogModule.env_vars(&dep, std::path::Path::new("/tmp"));
         assert_eq!(vars.get("SMTP_PORT").map(|s| s.as_str()), Some("2525"));
     }
 

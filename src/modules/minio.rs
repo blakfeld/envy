@@ -1,12 +1,10 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::collections::HashMap;
 
 use crate::config::Dependency;
 use crate::package_manager::PackageManager;
 
-use crate::output;
-
-use super::{Module, pm_dep};
+use super::{Module, pm_dep, tcp_ping};
 
 pub struct MinioModule;
 
@@ -17,16 +15,19 @@ fn package_name(pm: &dyn PackageManager) -> &'static str {
     }
 }
 
-fn port(dep: &Dependency) -> u16 {
-    dep.extra
-        .get("port")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(9000) as u16
+fn port(dep: &Dependency) -> anyhow::Result<u16> {
+    super::extra_port(dep, "port", 9000)
 }
 
 impl Module for MinioModule {
     fn is_service(&self) -> bool {
         true
+    }
+    fn default_port(&self) -> Option<u16> {
+        Some(9000)
+    }
+    fn known_extra_keys(&self) -> Option<&'static [&'static str]> {
+        Some(&["port", "console_port", "access_key", "secret_key"])
     }
 
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
@@ -50,16 +51,28 @@ impl Module for MinioModule {
     }
 
     fn health_check(&self, dep: &Dependency) -> Result<()> {
-        let p = port(dep);
-        let url = format!("http://127.0.0.1:{p}/minio/health/live");
-        ureq::get(&url)
-            .timeout(std::time::Duration::from_secs(2))
-            .call()
-            .with_context(|| format!("MinIO not reachable on port {p}"))?;
-        Ok(())
+        tcp_ping(port(dep)?, "MinIO")
     }
 
-    fn env_vars(&self, dep: &Dependency) -> HashMap<String, String> {
+    fn config_warnings(&self, dep: &Dependency) -> Vec<String> {
+        let has_creds =
+            dep.extra.contains_key("access_key") || dep.extra.contains_key("secret_key");
+        if has_creds {
+            vec![
+                "credentials in devy.yml will be written to plaintext .shadowenv.d — \
+                 do not commit production credentials; consider ejson or a secrets manager"
+                    .into(),
+            ]
+        } else {
+            vec![]
+        }
+    }
+
+    fn env_vars(
+        &self,
+        dep: &Dependency,
+        _project_root: &std::path::Path,
+    ) -> HashMap<String, String> {
         let mut vars = HashMap::new();
         if let Some(key) = dep.extra.get("access_key").and_then(|v| v.as_str()) {
             vars.insert("MINIO_ROOT_USER".into(), key.to_string());
@@ -67,10 +80,8 @@ impl Module for MinioModule {
         if let Some(secret) = dep.extra.get("secret_key").and_then(|v| v.as_str()) {
             vars.insert("MINIO_ROOT_PASSWORD".into(), secret.to_string());
         }
-        if !vars.is_empty() {
-            output::warn(
-                "minio credentials written to plaintext shadowenv — consider using ejson secrets instead",
-            );
+        if let Some(cp) = dep.extra.get("console_port").and_then(|v| v.as_u64()) {
+            vars.insert("MINIO_CONSOLE_ADDRESS".into(), format!(":{cp}"));
         }
         vars
     }
@@ -83,7 +94,10 @@ mod tests {
 
     fn dep_with_port(port: u64) -> Dependency {
         let mut extra = HashMap::new();
-        extra.insert("port".into(), serde_yaml::Value::Number(port.into()));
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(port.into()),
+        );
         Dependency::with_extra("minio", extra)
     }
 
@@ -95,13 +109,13 @@ mod tests {
     #[test]
     fn port_defaults_to_9000() {
         let dep = Dependency::simple("minio");
-        assert_eq!(port(&dep), 9000);
+        assert_eq!(port(&dep).unwrap(), 9000);
     }
 
     #[test]
     fn port_reads_custom_value() {
         let dep = dep_with_port(9001);
-        assert_eq!(port(&dep), 9001);
+        assert_eq!(port(&dep).unwrap(), 9001);
     }
 
     #[test]
@@ -114,7 +128,11 @@ mod tests {
     #[test]
     fn env_vars_empty_when_no_keys_configured() {
         let dep = Dependency::simple("minio");
-        assert!(MinioModule.env_vars(&dep).is_empty());
+        assert!(
+            MinioModule
+                .env_vars(&dep, std::path::Path::new("/tmp"))
+                .is_empty()
+        );
     }
 
     #[test]
@@ -122,14 +140,14 @@ mod tests {
         let mut extra = HashMap::new();
         extra.insert(
             "access_key".into(),
-            serde_yaml::Value::String("myuser".into()),
+            crate::config::ExtraValue::String("myuser".into()),
         );
         extra.insert(
             "secret_key".into(),
-            serde_yaml::Value::String("mypassword".into()),
+            crate::config::ExtraValue::String("mypassword".into()),
         );
         let dep = Dependency::with_extra("minio", extra);
-        let vars = MinioModule.env_vars(&dep);
+        let vars = MinioModule.env_vars(&dep, std::path::Path::new("/tmp"));
         assert_eq!(
             vars.get("MINIO_ROOT_USER").map(|s| s.as_str()),
             Some("myuser")
@@ -254,7 +272,7 @@ mod tests {
     #[test]
     fn env_vars_empty_returns_empty_not_non_empty() {
         let dep = Dependency::simple("minio");
-        let vars = MinioModule.env_vars(&dep);
+        let vars = MinioModule.env_vars(&dep, std::path::Path::new("/tmp"));
         assert!(vars.is_empty());
     }
 
@@ -263,14 +281,14 @@ mod tests {
         let mut extra = HashMap::new();
         extra.insert(
             "access_key".into(),
-            serde_yaml::Value::String("user".into()),
+            crate::config::ExtraValue::String("user".into()),
         );
         extra.insert(
             "secret_key".into(),
-            serde_yaml::Value::String("pass".into()),
+            crate::config::ExtraValue::String("pass".into()),
         );
         let dep = Dependency::with_extra("minio", extra);
-        let vars = MinioModule.env_vars(&dep);
+        let vars = MinioModule.env_vars(&dep, std::path::Path::new("/tmp"));
         assert!(
             !vars.is_empty(),
             "Expected non-empty vars when credentials are configured"
@@ -278,31 +296,110 @@ mod tests {
     }
 
     #[test]
-    fn env_vars_warns_only_when_credentials_present() {
-        use crate::output::WARN_CALL_COUNT;
-        use std::sync::atomic::Ordering;
-
-        // Verify warn is called when credentials are present but not when absent.
-        let before_with = WARN_CALL_COUNT.load(Ordering::Relaxed);
+    fn env_vars_does_not_warn_at_runtime() {
+        // Runtime warning moved to config_warnings (fires at devy check time).
+        // env_vars must be silent even when credentials are configured.
         let mut extra = HashMap::new();
-        extra.insert("access_key".into(), serde_yaml::Value::String("u".into()));
-        extra.insert("secret_key".into(), serde_yaml::Value::String("p".into()));
-        let dep_with = Dependency::with_extra("minio", extra);
-        let _ = MinioModule.env_vars(&dep_with);
-        let after_with = WARN_CALL_COUNT.load(Ordering::Relaxed);
-        assert!(
-            after_with > before_with,
-            "warn must be called when credentials are configured"
+        extra.insert(
+            "access_key".into(),
+            crate::config::ExtraValue::String("u".into()),
         );
+        extra.insert(
+            "secret_key".into(),
+            crate::config::ExtraValue::String("p".into()),
+        );
+        let dep = Dependency::with_extra("minio", extra);
+        let warn_count = crate::output::with_warn_capture(|| {
+            let _ = MinioModule.env_vars(&dep, std::path::Path::new("/tmp"));
+        });
+        assert_eq!(warn_count, 0, "env_vars must not warn at runtime");
+    }
 
-        // Without credentials: warn should NOT be called.
-        let before_without = WARN_CALL_COUNT.load(Ordering::Relaxed);
-        let dep_without = Dependency::simple("minio");
-        let _ = MinioModule.env_vars(&dep_without);
-        let after_without = WARN_CALL_COUNT.load(Ordering::Relaxed);
+    #[test]
+    fn env_vars_includes_console_address_when_configured() {
+        let mut extra = HashMap::new();
+        extra.insert(
+            "console_port".into(),
+            crate::config::ExtraValue::Number(9001u64.into()),
+        );
+        let dep = Dependency::with_extra("minio", extra);
+        let vars = MinioModule.env_vars(&dep, std::path::Path::new("/tmp"));
         assert_eq!(
-            before_without, after_without,
-            "warn must not be called for empty credentials"
+            vars.get("MINIO_CONSOLE_ADDRESS").map(|s| s.as_str()),
+            Some(":9001")
+        );
+    }
+
+    #[test]
+    fn env_vars_omits_console_address_when_not_configured() {
+        let dep = Dependency::simple("minio");
+        let vars = MinioModule.env_vars(&dep, std::path::Path::new("/tmp"));
+        assert!(!vars.contains_key("MINIO_CONSOLE_ADDRESS"));
+    }
+
+    #[test]
+    fn config_warnings_empty_when_no_credentials() {
+        let dep = Dependency::simple("minio");
+        assert!(MinioModule.config_warnings(&dep).is_empty());
+    }
+
+    #[test]
+    fn config_warnings_non_empty_when_access_key_configured() {
+        let mut extra = HashMap::new();
+        extra.insert(
+            "access_key".into(),
+            crate::config::ExtraValue::String("u".into()),
+        );
+        let dep = Dependency::with_extra("minio", extra);
+        assert!(
+            !MinioModule.config_warnings(&dep).is_empty(),
+            "must warn when access_key is set"
+        );
+    }
+
+    #[test]
+    fn config_warnings_non_empty_when_secret_key_configured() {
+        let mut extra = HashMap::new();
+        extra.insert(
+            "secret_key".into(),
+            crate::config::ExtraValue::String("s".into()),
+        );
+        let dep = Dependency::with_extra("minio", extra);
+        assert!(
+            !MinioModule.config_warnings(&dep).is_empty(),
+            "must warn when secret_key is set"
+        );
+    }
+
+    #[test]
+    fn config_warnings_empty_when_only_console_port_set() {
+        let mut extra = HashMap::new();
+        extra.insert(
+            "console_port".into(),
+            crate::config::ExtraValue::Number(9001u64.into()),
+        );
+        let dep = Dependency::with_extra("minio", extra);
+        assert!(
+            MinioModule.config_warnings(&dep).is_empty(),
+            "console_port alone must not produce config warnings"
+        );
+    }
+
+    #[test]
+    fn env_vars_no_warn_when_only_console_port_set() {
+        // console_port alone must not trigger the credentials warning.
+        let mut extra = HashMap::new();
+        extra.insert(
+            "console_port".into(),
+            crate::config::ExtraValue::Number(9001u64.into()),
+        );
+        let dep = Dependency::with_extra("minio", extra);
+        let warn_count = crate::output::with_warn_capture(|| {
+            let _ = MinioModule.env_vars(&dep, std::path::Path::new("/tmp"));
+        });
+        assert_eq!(
+            warn_count, 0,
+            "console_port alone must not warn about credentials"
         );
     }
 }

@@ -28,27 +28,24 @@ fn rustup_bin() -> Option<String> {
 }
 
 impl Module for RustModule {
+    fn known_extra_keys(&self) -> Option<&'static [&'static str]> {
+        Some(&["toolchain", "targets", "components"])
+    }
+
     fn is_installed(&self, _pm: &dyn PackageManager, _dep: &Dependency) -> Result<bool> {
-        Ok(which("rustup").is_ok() || which("cargo").is_ok())
+        Ok(which("rustup").is_ok())
     }
 
     fn install(&self, _pm: &dyn PackageManager, dep: &Dependency) -> Result<()> {
         if which("rustup").is_err() {
-            #[cfg(test)]
             let installer_cmd =
-                std::env::var("ENVY_TEST_RUSTUP_INSTALLER_SCRIPT").unwrap_or_else(|_| {
+                std::env::var("DEVY_TEST_RUSTUP_INSTALLER_SCRIPT").unwrap_or_else(|_| {
                     concat!(
                         "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs",
                         " | sh -s -- -y --no-modify-path"
                     )
                     .to_string()
                 });
-            #[cfg(not(test))]
-            let installer_cmd = concat!(
-                "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs",
-                " | sh -s -- -y --no-modify-path"
-            )
-            .to_string();
 
             let status = Command::new("sh")
                 .arg("-c")
@@ -82,8 +79,8 @@ impl Module for RustModule {
         Ok(())
     }
 
-    fn source(&self) -> &'static str {
-        "rustup"
+    fn source(&self) -> Option<&'static str> {
+        Some("rustup")
     }
 
     fn resolved_version(
@@ -117,7 +114,7 @@ mod tests {
         let mut extra = HashMap::new();
         extra.insert(
             "toolchain".into(),
-            serde_yaml::Value::String(toolchain.into()),
+            crate::config::ExtraValue::String(toolchain.into()),
         );
         Dependency::with_extra("rust", extra)
     }
@@ -146,7 +143,7 @@ mod tests {
 
     #[test]
     fn rust_module_source_is_rustup() {
-        assert_eq!(RustModule.source(), "rustup");
+        assert_eq!(RustModule.source(), Some("rustup"));
     }
 
     // ── rustup_bin ────────────────────────────────────────────────────────────
@@ -277,7 +274,7 @@ mod tests {
         let mut extra = std::collections::HashMap::new();
         extra.insert(
             "toolchain".into(),
-            serde_yaml::Value::String("invalid-toolchain-envy-test-xyz-12345".into()),
+            crate::config::ExtraValue::String("invalid-toolchain-devy-test-xyz-12345".into()),
         );
         let dep = Dependency::with_extra("rust", extra);
         let result = RustModule.install(&pm, &dep);
@@ -290,18 +287,22 @@ mod tests {
     #[test]
     fn rust_install_rustup_script_failure_propagated() {
         // When rustup is NOT on PATH and the installer script fails, install must return Err.
-        // Uses ENVY_TEST_RUSTUP_INSTALLER_SCRIPT to inject a failing script.
+        // Uses DEVY_TEST_RUSTUP_INSTALLER_SCRIPT to inject a failing script.
         if which::which("rustup").is_ok() {
             return;
         }
+        let _guard = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // SAFETY: serialised by ENV_LOCK; var is only read by RustModule::install.
         unsafe {
-            std::env::set_var("ENVY_TEST_RUSTUP_INSTALLER_SCRIPT", "exit 1");
+            std::env::set_var("DEVY_TEST_RUSTUP_INSTALLER_SCRIPT", "exit 1");
         }
         let pm = crate::package_manager::MockPackageManager::default();
         let dep = Dependency::simple("rust");
         let result = RustModule.install(&pm, &dep);
         unsafe {
-            std::env::remove_var("ENVY_TEST_RUSTUP_INSTALLER_SCRIPT");
+            std::env::remove_var("DEVY_TEST_RUSTUP_INSTALLER_SCRIPT");
         }
         assert!(
             result.is_err(),
@@ -318,14 +319,18 @@ mod tests {
         if which::which("rustup").is_ok() {
             return;
         }
+        let _guard = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // SAFETY: serialised by ENV_LOCK; var is only read by RustModule::install.
         unsafe {
-            std::env::set_var("ENVY_TEST_RUSTUP_INSTALLER_SCRIPT", "exit 0");
+            std::env::set_var("DEVY_TEST_RUSTUP_INSTALLER_SCRIPT", "exit 0");
         }
         let pm = crate::package_manager::MockPackageManager::default();
         let dep = Dependency::simple("rust");
         let result = RustModule.install(&pm, &dep);
         unsafe {
-            std::env::remove_var("ENVY_TEST_RUSTUP_INSTALLER_SCRIPT");
+            std::env::remove_var("DEVY_TEST_RUSTUP_INSTALLER_SCRIPT");
         }
         // With the `!` deleted, a successful script causes bail! — the error message
         // is "rustup installation failed". A correct implementation proceeds past the

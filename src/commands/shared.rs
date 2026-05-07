@@ -1,12 +1,9 @@
 use anyhow::Result;
 use colored::Colorize;
 use std::collections::HashMap;
-use std::path::Path;
 
 use crate::config::Dependency;
-use crate::env_manager::shadowenv;
 use crate::modules;
-use crate::output;
 use crate::package_manager::PackageManager;
 
 /// Renders the dependency status table and returns the number of issues found.
@@ -21,7 +18,7 @@ pub fn print_dep_table(
         .map(|d| d.versioned_name().len())
         .max()
         .unwrap_or(0);
-    let status_col = "not installed".len();
+    const STATUS_COL: usize = "not installed".len();
     let mut issues = 0usize;
 
     for dep in deps {
@@ -63,7 +60,7 @@ pub fn print_dep_table(
         };
 
         println!(
-            "  {}  {:<name_col$}  {:<status_col$}  {}",
+            "  {}  {:<name_col$}  {:<STATUS_COL$}  {}",
             icon, name, status, service
         );
     }
@@ -73,28 +70,41 @@ pub fn print_dep_table(
 
 /// Renders the environment variable status table and returns the number of issues found.
 ///
+/// `written_vars` is the result of reading the env manager's written config (e.g. the
+/// shadowenv lisp file). Pass `None` if the file has not been written yet.
+///
 /// When `bold_errors = true` (check command): shows ✓/✗ icons with "configured"/"missing" labels.
 /// When `bold_errors = false` (status command): shows each key with its current value.
-pub fn print_env_table(config_env: &HashMap<String, String>, bold_errors: bool) -> Result<usize> {
+pub fn print_env_table(
+    config_env: &HashMap<String, String>,
+    written_vars: Option<HashMap<String, String>>,
+    bold_errors: bool,
+) -> Result<usize> {
     let mut issues = 0usize;
-    let written = shadowenv::read_vars(Path::new(shadowenv::ENV_FILE));
     let key_col = config_env.keys().map(|k| k.len()).max().unwrap_or(0);
+    let mut sorted_keys: Vec<&String> = config_env.keys().collect();
+    sorted_keys.sort();
 
-    match written {
+    match written_vars {
         None if bold_errors => {
-            issues += config_env.len();
-            println!(
-                "  {}  environment not configured — run {}",
-                "✗".red().bold(),
-                "devy up".bold()
-            );
+            for key in &sorted_keys {
+                issues += 1;
+                println!(
+                    "  {}  {:<key_col$}  {}",
+                    "✗".red().bold(),
+                    key,
+                    "missing".red().bold()
+                );
+            }
         }
         None => {
-            output::info("not configured — run devy up first");
+            for key in &sorted_keys {
+                println!("  {:<key_col$}  {}", key, "(not configured)".dimmed());
+            }
         }
         Some(ref vars) if bold_errors => {
-            for key in config_env.keys() {
-                let (icon, value): (String, String) = if vars.contains_key(key) {
+            for key in &sorted_keys {
+                let (icon, value): (String, String) = if vars.contains_key(*key) {
                     (
                         "✓".green().bold().to_string(),
                         "configured".green().to_string(),
@@ -110,9 +120,9 @@ pub fn print_env_table(config_env: &HashMap<String, String>, bold_errors: bool) 
             }
         }
         Some(vars) => {
-            for key in config_env.keys() {
+            for key in &sorted_keys {
                 let value = vars
-                    .get(key)
+                    .get(*key)
                     .map(String::as_str)
                     .unwrap_or("(not set)")
                     .dimmed();
@@ -122,6 +132,68 @@ pub fn print_env_table(config_env: &HashMap<String, String>, bold_errors: bool) 
     }
 
     Ok(issues)
+}
+
+/// Renders the PATH prepend status table. Shows ✓/✗ in check mode, plain path list in status mode.
+/// Returns the number of missing entries (issues) when `bold_errors = true`.
+pub fn print_path_table(
+    configured: &[String],
+    written: Option<Vec<String>>,
+    bold_errors: bool,
+) -> usize {
+    let mut issues = 0usize;
+    match written {
+        None if bold_errors => {
+            for entry in configured {
+                issues += 1;
+                println!(
+                    "  {}  {}  {}",
+                    "✗".red().bold(),
+                    entry,
+                    "missing".red().bold()
+                );
+            }
+        }
+        None => {
+            for entry in configured {
+                println!("  {}  {}", entry, "(not configured)".dimmed());
+            }
+        }
+        Some(ref written_entries) if bold_errors => {
+            let written_set: std::collections::HashSet<&str> =
+                written_entries.iter().map(String::as_str).collect();
+            for entry in configured {
+                if written_set.contains(entry.as_str()) {
+                    println!(
+                        "  {}  {}  {}",
+                        "✓".green().bold(),
+                        entry,
+                        "configured".green()
+                    );
+                } else {
+                    issues += 1;
+                    println!(
+                        "  {}  {}  {}",
+                        "✗".red().bold(),
+                        entry,
+                        "missing".red().bold()
+                    );
+                }
+            }
+        }
+        Some(ref written_entries) => {
+            let written_set: std::collections::HashSet<&str> =
+                written_entries.iter().map(String::as_str).collect();
+            for entry in configured {
+                if written_set.contains(entry.as_str()) {
+                    println!("  {}  {}", entry, "✓".green());
+                } else {
+                    println!("  {}  {}", entry, "(not set)".dimmed());
+                }
+            }
+        }
+    }
+    issues
 }
 
 #[cfg(test)]
@@ -212,21 +284,21 @@ mod tests {
 
     #[test]
     fn print_env_table_returns_zero_for_empty_env() {
-        let issues = print_env_table(&HashMap::new(), false).unwrap();
+        let issues = print_env_table(&HashMap::new(), None, false).unwrap();
         assert_eq!(issues, 0);
     }
 
     #[test]
     fn print_env_table_check_mode_returns_count_when_env_not_configured() {
         // Kills `replace print_env_table -> Ok(0)` and `replace -> Ok(1)`.
-        // With bold_errors=true (check mode) and no shadowenv file, issues = config_env.len().
+        // With bold_errors=true (check mode) and no written vars, issues = config_env.len().
         let mut env = HashMap::new();
         env.insert("FOO".to_string(), "bar".to_string());
         env.insert("BAZ".to_string(), "qux".to_string());
-        let issues = print_env_table(&env, true).unwrap();
+        let issues = print_env_table(&env, None, true).unwrap();
         assert_eq!(
             issues, 2,
-            "issues must equal env count when shadowenv file is missing"
+            "issues must equal env count when env vars not written yet"
         );
     }
 
@@ -235,7 +307,7 @@ mod tests {
         // In status mode (bold_errors=false), missing config prints a message but counts 0 issues.
         let mut env = HashMap::new();
         env.insert("FOO".to_string(), "bar".to_string());
-        let issues = print_env_table(&env, false).unwrap();
+        let issues = print_env_table(&env, None, false).unwrap();
         assert_eq!(issues, 0);
     }
 
@@ -245,11 +317,30 @@ mod tests {
         let mut env = HashMap::new();
         env.insert("KEY".to_string(), "val".to_string());
         // true mode reports issues; false mode reports 0 (status mode).
-        let check_issues = print_env_table(&env, true).unwrap();
-        let status_issues = print_env_table(&env, false).unwrap();
+        let check_issues = print_env_table(&env, None, true).unwrap();
+        let status_issues = print_env_table(&env, None, false).unwrap();
         assert!(
             check_issues >= status_issues,
             "check mode issues ({check_issues}) must be >= status mode issues ({status_issues})"
         );
+    }
+
+    #[test]
+    fn print_env_table_check_mode_reports_configured_when_var_present() {
+        let mut env = HashMap::new();
+        env.insert("MY_VAR".to_string(), "value".to_string());
+        let mut written = HashMap::new();
+        written.insert("MY_VAR".to_string(), "value".to_string());
+        let issues = print_env_table(&env, Some(written), true).unwrap();
+        assert_eq!(issues, 0, "configured var must not count as an issue");
+    }
+
+    #[test]
+    fn print_env_table_check_mode_reports_missing_when_var_absent_from_written() {
+        let mut env = HashMap::new();
+        env.insert("MY_VAR".to_string(), "value".to_string());
+        let written = HashMap::new(); // empty — var not written
+        let issues = print_env_table(&env, Some(written), true).unwrap();
+        assert_eq!(issues, 1, "missing var must count as an issue");
     }
 }

@@ -278,3 +278,35 @@ Each module knows the correct package name for each platform — you always use 
 **Ubuntu/Debian:** Install operations use `sudo apt-get`. Version pinning with the `version:` field uses apt's exact-version syntax (`pkg=version`) — for most languages, omit the version field and rely on `devy.lock` to pin the installed version across machines.
 
 **Windows:** Service management uses `net start`/`sc`. Custom MySQL/PostgreSQL config options (`port`, `cli_args`) are not applied on Windows.
+
+## Security
+
+### `after_install`
+
+`devy.yml` supports an `after_install` field that runs an arbitrary shell command immediately after a dependency is freshly installed:
+
+```yaml
+dependencies:
+  - mysql:
+      after_install: "mysql_secure_installation"
+```
+
+**This executes arbitrary code on your machine.** devy prints a warning to the terminal before executing each `after_install` command so you can see what is about to run. Before running `devy up` on a project you did not author — especially one shared via a template or onboarding flow — review all `after_install` values in `devy.yml`.
+
+This is the same attack surface as `npm install` lifecycle scripts or `pip install` running `setup.py`.
+
+### Homebrew auto-install
+
+If Homebrew is not installed on macOS, devy will attempt to install it by fetching and executing the official install script from GitHub over HTTPS. No hash verification is performed.
+
+Set `DEVY_NO_BOOTSTRAP=1` to disable automatic Homebrew installation. devy will exit with an error and instructions to install Homebrew manually:
+
+```sh
+DEVY_NO_BOOTSTRAP=1 devy up
+```
+
+This is recommended in CI environments where unexpected system-level changes should be blocked.
+
+### `devy.yml` scope
+
+devy walks up the directory tree to find `devy.yml` but stops at the nearest `.git` root (or `$HOME`). It will not read `devy.yml` files from parent directories outside the current git repository, preventing a malicious config in a parent directory from being executed.

@@ -48,8 +48,8 @@ mod tests {
     }
 
     #[test]
-    fn typescript_source_is_homebrew() {
-        assert_eq!(TypeScriptModule.source(), "homebrew");
+    fn typescript_source_is_none() {
+        assert_eq!(TypeScriptModule.source(), None);
     }
 
     #[test]

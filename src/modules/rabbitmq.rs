@@ -17,16 +17,19 @@ fn package_name(pm: &dyn PackageManager) -> &'static str {
     }
 }
 
-fn port(dep: &Dependency) -> u16 {
-    dep.extra
-        .get("port")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(5672) as u16
+fn port(dep: &Dependency) -> anyhow::Result<u16> {
+    super::extra_port(dep, "port", 5672)
 }
 
 impl Module for RabbitmqModule {
     fn is_service(&self) -> bool {
         true
+    }
+    fn default_port(&self) -> Option<u16> {
+        Some(5672)
+    }
+    fn known_extra_keys(&self) -> Option<&'static [&'static str]> {
+        Some(&["port"])
     }
 
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
@@ -50,7 +53,7 @@ impl Module for RabbitmqModule {
     }
 
     fn health_check(&self, dep: &Dependency) -> Result<()> {
-        let p = port(dep);
+        let p = port(dep)?;
         let addr: SocketAddr = format!("127.0.0.1:{p}").parse()?;
         TcpStream::connect_timeout(&addr, Duration::from_secs(1))
             .with_context(|| format!("RabbitMQ not accepting connections on port {p}"))?;
@@ -65,12 +68,16 @@ mod tests {
 
     fn dep_with_port(port: u64) -> Dependency {
         let mut extra = HashMap::new();
-        extra.insert("port".into(), serde_yaml::Value::Number(port.into()));
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(port.into()),
+        );
         Dependency {
             name: "rabbitmq".into(),
             version: None,
             tap: None,
             after_install: None,
+            shell: None,
             extra,
         }
     }
@@ -83,13 +90,19 @@ mod tests {
     #[test]
     fn port_defaults_to_5672() {
         let dep = Dependency::simple("rabbitmq");
-        assert_eq!(port(&dep), 5672);
+        assert_eq!(port(&dep).unwrap(), 5672);
     }
 
     #[test]
     fn port_reads_custom_value() {
         let dep = dep_with_port(5673);
-        assert_eq!(port(&dep), 5673);
+        assert_eq!(port(&dep).unwrap(), 5673);
+    }
+
+    #[test]
+    fn port_bails_on_out_of_range() {
+        let dep = dep_with_port(99999);
+        assert!(port(&dep).is_err());
     }
 
     #[test]

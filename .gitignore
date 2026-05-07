@@ -5,4 +5,8 @@ mutants.out/
 mutants.txt
 review.md
 todo.md
+plan.md
+*.lock.tmp
+.devy_node_global_stamp
+.devy_gcloud_components_stamp
 

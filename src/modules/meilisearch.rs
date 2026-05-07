@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::collections::HashMap;
 
 use crate::config::Dependency;
@@ -6,7 +6,7 @@ use crate::package_manager::PackageManager;
 
 use crate::output;
 
-use super::{Module, pm_dep};
+use super::{Module, pm_dep, tcp_ping};
 
 pub struct MeilisearchModule;
 
@@ -17,16 +17,19 @@ fn package_name(pm: &dyn PackageManager) -> &'static str {
     }
 }
 
-fn port(dep: &Dependency) -> u16 {
-    dep.extra
-        .get("port")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(7700) as u16
+fn port(dep: &Dependency) -> anyhow::Result<u16> {
+    super::extra_port(dep, "port", 7700)
 }
 
 impl Module for MeilisearchModule {
     fn is_service(&self) -> bool {
         true
+    }
+    fn default_port(&self) -> Option<u16> {
+        Some(7700)
+    }
+    fn known_extra_keys(&self) -> Option<&'static [&'static str]> {
+        Some(&["port", "master_key"])
     }
 
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
@@ -49,25 +52,48 @@ impl Module for MeilisearchModule {
         pm.stop_service(&self.service_name(dep))
     }
 
-    fn health_check(&self, dep: &Dependency) -> Result<()> {
-        let p = port(dep);
-        let url = format!("http://127.0.0.1:{p}/health");
-        ureq::get(&url)
-            .timeout(std::time::Duration::from_secs(2))
-            .call()
-            .with_context(|| format!("Meilisearch not reachable on port {p}"))?;
-        Ok(())
+    fn service_config(&self) -> super::ServiceConfig {
+        super::ServiceConfig {
+            health_check_max_attempts: 60,
+            ..Default::default()
+        }
     }
 
-    fn env_vars(&self, dep: &Dependency) -> HashMap<String, String> {
+    fn health_check(&self, dep: &Dependency) -> Result<()> {
+        tcp_ping(port(dep)?, "Meilisearch")
+    }
+
+    fn env_vars(
+        &self,
+        dep: &Dependency,
+        _project_root: &std::path::Path,
+    ) -> HashMap<String, String> {
         let mut vars = HashMap::new();
         if let Some(key) = dep.extra.get("master_key").and_then(|v| v.as_str()) {
             vars.insert("MEILI_MASTER_KEY".into(), key.to_string());
-            output::warn(
-                "meilisearch master_key written to plaintext shadowenv — consider using ejson secrets instead",
-            );
         }
         vars
+    }
+
+    fn post_setup(
+        &self,
+        dep: &Dependency,
+        _pm: &dyn PackageManager,
+        _project_root: &std::path::Path,
+    ) -> Result<()> {
+        if dep
+            .extra
+            .get("master_key")
+            .and_then(|v| v.as_str())
+            .is_some()
+        {
+            output::warn(
+                "Meilisearch: master_key is set in plaintext in devy.yml. \
+                 Consider using environment variable substitution or a secrets manager \
+                 rather than committing this value.",
+            );
+        }
+        Ok(())
     }
 }
 
@@ -78,7 +104,10 @@ mod tests {
 
     fn dep_with_port(port: u64) -> Dependency {
         let mut extra = HashMap::new();
-        extra.insert("port".into(), serde_yaml::Value::Number(port.into()));
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(port.into()),
+        );
         Dependency::with_extra("meilisearch", extra)
     }
 
@@ -90,13 +119,19 @@ mod tests {
     #[test]
     fn port_defaults_to_7700() {
         let dep = Dependency::simple("meilisearch");
-        assert_eq!(port(&dep), 7700);
+        assert_eq!(port(&dep).unwrap(), 7700);
     }
 
     #[test]
     fn port_reads_custom_value() {
         let dep = dep_with_port(7701);
-        assert_eq!(port(&dep), 7701);
+        assert_eq!(port(&dep).unwrap(), 7701);
+    }
+
+    #[test]
+    fn port_bails_on_out_of_range() {
+        let dep = dep_with_port(99999);
+        assert!(port(&dep).is_err());
     }
 
     #[test]
@@ -109,7 +144,11 @@ mod tests {
     #[test]
     fn env_vars_empty_when_no_master_key() {
         let dep = Dependency::simple("meilisearch");
-        assert!(MeilisearchModule.env_vars(&dep).is_empty());
+        assert!(
+            MeilisearchModule
+                .env_vars(&dep, std::path::Path::new("/tmp"))
+                .is_empty()
+        );
     }
 
     #[test]
@@ -117,10 +156,10 @@ mod tests {
         let mut extra = HashMap::new();
         extra.insert(
             "master_key".into(),
-            serde_yaml::Value::String("supersecret".into()),
+            crate::config::ExtraValue::String("supersecret".into()),
         );
         let dep = Dependency::with_extra("meilisearch", extra);
-        let vars = MeilisearchModule.env_vars(&dep);
+        let vars = MeilisearchModule.env_vars(&dep, std::path::Path::new("/tmp"));
         assert_eq!(
             vars.get("MEILI_MASTER_KEY").map(|s| s.as_str()),
             Some("supersecret")

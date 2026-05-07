@@ -8,6 +8,10 @@ use super::Module;
 pub struct GenericModule;
 
 impl Module for GenericModule {
+    fn known_extra_keys(&self) -> Option<&'static [&'static str]> {
+        None
+    }
+
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
         pm.is_package_installed(dep)
     }

@@ -23,6 +23,12 @@ pub(crate) fn parse_dpkg_version(status_success: bool, stdout: &str) -> Option<S
     if ver.is_empty() { None } else { Some(ver) }
 }
 
+/// Returns true when the installed version satisfies the required version.
+/// Uses exact-match semantics matching apt's `name=version` install spec.
+pub(crate) fn installed_version_matches(installed: Option<&str>, required: &str) -> bool {
+    installed.map(|v| v == required).unwrap_or(false)
+}
+
 fn service_config_dir_impl(service: &str, pg_base: &std::path::Path) -> Option<PathBuf> {
     match service {
         "mysql" | "mariadb" => Some(PathBuf::from("/etc/mysql/conf.d")),
@@ -67,6 +73,12 @@ impl Apt {
     }
 }
 
+impl Default for Apt {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PackageManager for Apt {
     fn name(&self) -> &str {
         "apt"
@@ -86,11 +98,25 @@ impl PackageManager for Apt {
             .output()
             .with_context(|| format!("Failed to query dpkg for {}", dep.name))?;
         let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(stdout.contains("install ok installed"))
+        if !stdout.contains("install ok installed") {
+            return Ok(false);
+        }
+        if let Some(ver) = &dep.version {
+            let ver_output = Command::new("dpkg-query")
+                .args(["-W", "-f=${Version}", &dep.name])
+                .output()
+                .with_context(|| format!("Failed to query dpkg version for {}", dep.name))?;
+            let installed = parse_dpkg_version(
+                ver_output.status.success(),
+                &String::from_utf8_lossy(&ver_output.stdout),
+            );
+            return Ok(installed_version_matches(installed.as_deref(), ver));
+        }
+        Ok(true)
     }
 
     fn install_package(&self, dep: &Dependency) -> Result<()> {
-        // apt version pinning requires exact Debian version strings; the envy version field
+        // apt version pinning requires exact Debian version strings; the devy version field
         // is passed through as-is. Partial versions (e.g. "20") may not resolve — users
         // relying on PPAs or NodeSource repos should omit the version field and rely on
         // devy.lock to pin the installed version across machines.
@@ -158,16 +184,8 @@ impl PackageManager for Apt {
 mod tests {
     use super::*;
 
-    fn tmp_dir() -> PathBuf {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static N: AtomicU64 = AtomicU64::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "devy_apt_{}_{}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+    fn tmp_dir() -> crate::test_support::TempDir {
+        crate::test_support::tmp_dir()
     }
 
     // ── name ──────────────────────────────────────────────────────────────────
@@ -182,6 +200,28 @@ mod tests {
     #[test]
     fn apt_bootstrap_always_bails() {
         assert!(Apt::new().bootstrap().is_err());
+    }
+
+    // ── installed_version_matches ─────────────────────────────────────────────
+
+    #[test]
+    fn installed_version_matches_returns_true_on_exact_match() {
+        assert!(installed_version_matches(
+            Some("16.3.1-1ubuntu1"),
+            "16.3.1-1ubuntu1"
+        ));
+        assert!(installed_version_matches(Some("2:8.0.36-1"), "2:8.0.36-1"));
+    }
+
+    #[test]
+    fn installed_version_matches_returns_false_on_version_mismatch() {
+        assert!(!installed_version_matches(Some("15.0"), "16.0"));
+        assert!(!installed_version_matches(Some("16.0.0"), "16.0"));
+    }
+
+    #[test]
+    fn installed_version_matches_returns_false_when_not_installed() {
+        assert!(!installed_version_matches(None, "16.0"));
     }
 
     // ── parse_systemctl_status ────────────────────────────────────────────────
@@ -257,7 +297,6 @@ mod tests {
             "Expected highest version (14) directory, got: {}",
             path.display()
         );
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -266,7 +305,6 @@ mod tests {
         std::fs::create_dir_all(base.join("15").join("main").join("conf.d")).unwrap();
         let result = service_config_dir_impl("postgres", &base);
         assert!(result.is_some());
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -274,14 +312,12 @@ mod tests {
         let base = tmp_dir();
         let result = service_config_dir_impl("postgresql", &base);
         assert!(result.is_none(), "Expected None when no version dirs exist");
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
     fn service_config_dir_impl_unknown_service_returns_none() {
         let base = tmp_dir();
         assert!(service_config_dir_impl("redis", &base).is_none());
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -291,6 +327,5 @@ mod tests {
             service_config_dir_impl("mysql", &base),
             Some(PathBuf::from("/etc/mysql/conf.d"))
         );
-        let _ = std::fs::remove_dir_all(&base);
     }
 }

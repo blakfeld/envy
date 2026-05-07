@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use crate::commands;
+use crate::output;
 
 #[derive(Parser)]
 #[command(
@@ -61,8 +62,7 @@ enum Commands {
     },
     /// List commands from devy.yml — used by shell completion, not intended for direct use
     #[command(hide = true, name = "_commands")]
-    #[allow(clippy::enum_variant_names)]
-    ListCommands,
+    ListDefined,
     /// Run a command defined in devy.yml
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -72,9 +72,14 @@ impl Cli {
     pub fn run(&self) -> Result<()> {
         match &self.command {
             Commands::Up {
-                update: _,
+                update,
                 dry_run: true,
-            } => commands::check::run(),
+            } => {
+                if *update {
+                    output::warn("--update has no effect with --dry-run; ignoring");
+                }
+                commands::check::run()
+            }
             Commands::Up {
                 update,
                 dry_run: false,
@@ -90,11 +95,14 @@ impl Cli {
             Commands::Status => commands::status::run(),
             Commands::Check => commands::check::run(),
             Commands::Hook { shell } => commands::hook::run(shell),
-            Commands::ListCommands => {
+            Commands::ListDefined => {
                 commands::list_commands::run();
                 Ok(())
             }
-            Commands::External(args) => commands::exec::run(&args[0]),
+            Commands::External(args) => match args.as_slice() {
+                [cmd, extra @ ..] => commands::exec::run(cmd, extra),
+                [] => anyhow::bail!("external subcommand name missing"),
+            },
         }
     }
 }

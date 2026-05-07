@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::borrow::Cow;
+use std::io::Read;
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
 
@@ -20,11 +21,8 @@ fn package_name(pm: &dyn PackageManager) -> &'static str {
     }
 }
 
-fn port(dep: &Dependency) -> u16 {
-    dep.extra
-        .get("port")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(3306) as u16
+fn port(dep: &Dependency) -> anyhow::Result<u16> {
+    super::extra_port(dep, "port", 3306)
 }
 
 fn cli_args(dep: &Dependency) -> Option<String> {
@@ -38,15 +36,28 @@ impl Module for MariadbModule {
     fn is_service(&self) -> bool {
         true
     }
+    fn default_port(&self) -> Option<u16> {
+        Some(3306)
+    }
+    fn known_extra_keys(&self) -> Option<&'static [&'static str]> {
+        Some(&["port", "cli_args"])
+    }
 
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
         pm.is_package_installed(&pm_dep(dep, package_name(pm)))
     }
 
     fn install(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<()> {
-        pm.install_package(&pm_dep(dep, package_name(pm)))?;
+        pm.install_package(&pm_dep(dep, package_name(pm)))
+    }
 
-        let p = port(dep);
+    fn post_setup(
+        &self,
+        dep: &Dependency,
+        pm: &dyn PackageManager,
+        _project_root: &std::path::Path,
+    ) -> Result<()> {
+        let p = port(dep)?;
         let args = cli_args(dep);
         if p != 3306 || args.is_some() {
             match pm.service_config_dir("mariadb") {
@@ -59,7 +70,6 @@ impl Module for MariadbModule {
                 }
             }
         }
-
         Ok(())
     }
 
@@ -82,10 +92,18 @@ impl Module for MariadbModule {
     }
 
     fn health_check(&self, dep: &Dependency) -> Result<()> {
-        let p = port(dep);
+        let p = port(dep)?;
         let addr: SocketAddr = format!("127.0.0.1:{p}").parse()?;
-        TcpStream::connect_timeout(&addr, Duration::from_secs(1))
+        let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(1))
             .with_context(|| format!("MariaDB not accepting connections on port {p}"))?;
+        stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+        // MariaDB/MySQL protocol: 4-byte packet header, then payload begins with 0x0a (protocol v10).
+        let mut header = [0u8; 5];
+        stream.read_exact(&mut header)?;
+        anyhow::ensure!(
+            header[4] == 0x0a,
+            "MariaDB on port {p} returned unexpected protocol byte"
+        );
         Ok(())
     }
 }
@@ -97,7 +115,10 @@ mod tests {
 
     fn dep_with_port(port: u64) -> Dependency {
         let mut extra = HashMap::new();
-        extra.insert("port".into(), serde_yaml::Value::Number(port.into()));
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(port.into()),
+        );
         Dependency::with_extra("mariadb", extra)
     }
 
@@ -109,13 +130,19 @@ mod tests {
     #[test]
     fn port_defaults_to_3306() {
         let dep = Dependency::simple("mariadb");
-        assert_eq!(port(&dep), 3306);
+        assert_eq!(port(&dep).unwrap(), 3306);
     }
 
     #[test]
     fn port_reads_custom_value() {
         let dep = dep_with_port(3307);
-        assert_eq!(port(&dep), 3307);
+        assert_eq!(port(&dep).unwrap(), 3307);
+    }
+
+    #[test]
+    fn port_bails_on_out_of_range() {
+        let dep = dep_with_port(99999);
+        assert!(port(&dep).is_err());
     }
 
     #[test]
@@ -136,7 +163,7 @@ mod tests {
         let mut extra = HashMap::new();
         extra.insert(
             "cli_args".into(),
-            serde_yaml::Value::String("--innodb-buffer-pool-size=256M".into()),
+            crate::config::ExtraValue::String("--innodb-buffer-pool-size=256M".into()),
         );
         let dep = Dependency::with_extra("mariadb", extra);
         assert_eq!(
@@ -209,7 +236,7 @@ mod tests {
     }
 
     #[test]
-    fn install_writes_config_when_default_port_but_cli_args_set() {
+    fn post_setup_writes_config_when_default_port_but_cli_args_set() {
         let dir = std::env::temp_dir().join(format!("devy_mariadb_test_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pm = crate::package_manager::MockPackageManager {
@@ -219,17 +246,19 @@ mod tests {
         let mut extra = HashMap::new();
         extra.insert(
             "cli_args".into(),
-            serde_yaml::Value::String("--innodb-buffer-pool-size=256M".into()),
+            crate::config::ExtraValue::String("--innodb-buffer-pool-size=256M".into()),
         );
         let dep = Dependency::with_extra("mariadb", extra);
-        MariadbModule.install(&pm, &dep).unwrap();
+        MariadbModule
+            .post_setup(&dep, &pm, std::path::Path::new("/tmp"))
+            .unwrap();
         let content = std::fs::read_to_string(dir.join("my.cnf")).unwrap();
         assert!(content.contains("innodb-buffer-pool-size"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn install_skips_config_when_default_port_no_args() {
+    fn post_setup_skips_config_when_default_port_no_args() {
         let dir = std::env::temp_dir().join(format!("devy_mariadb_skip_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pm = crate::package_manager::MockPackageManager {
@@ -237,7 +266,9 @@ mod tests {
             ..Default::default()
         };
         let dep = Dependency::simple("mariadb");
-        MariadbModule.install(&pm, &dep).unwrap();
+        MariadbModule
+            .post_setup(&dep, &pm, std::path::Path::new("/tmp"))
+            .unwrap();
         assert!(!dir.join("my.cnf").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }

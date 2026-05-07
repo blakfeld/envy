@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use std::io::Read;
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
 
@@ -19,11 +20,8 @@ fn package_name(pm: &dyn PackageManager) -> &'static str {
     }
 }
 
-fn port(dep: &Dependency) -> u16 {
-    dep.extra
-        .get("port")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(3306) as u16
+fn port(dep: &Dependency) -> anyhow::Result<u16> {
+    super::extra_port(dep, "port", 3306)
 }
 
 fn cli_args(dep: &Dependency) -> Option<String> {
@@ -37,15 +35,28 @@ impl Module for MysqlModule {
     fn is_service(&self) -> bool {
         true
     }
+    fn default_port(&self) -> Option<u16> {
+        Some(3306)
+    }
+    fn known_extra_keys(&self) -> Option<&'static [&'static str]> {
+        Some(&["port", "cli_args"])
+    }
 
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
         pm.is_package_installed(&pm_dep(dep, package_name(pm)))
     }
 
     fn install(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<()> {
-        pm.install_package(&pm_dep(dep, package_name(pm)))?;
+        pm.install_package(&pm_dep(dep, package_name(pm)))
+    }
 
-        let p = port(dep);
+    fn post_setup(
+        &self,
+        dep: &Dependency,
+        pm: &dyn PackageManager,
+        _project_root: &std::path::Path,
+    ) -> Result<()> {
+        let p = port(dep)?;
         let args = cli_args(dep);
         if p != 3306 || args.is_some() {
             match pm.service_config_dir("mysql") {
@@ -58,7 +69,6 @@ impl Module for MysqlModule {
                 }
             }
         }
-
         Ok(())
     }
 
@@ -75,10 +85,18 @@ impl Module for MysqlModule {
     }
 
     fn health_check(&self, dep: &Dependency) -> Result<()> {
-        let p = port(dep);
+        let p = port(dep)?;
         let addr: SocketAddr = format!("127.0.0.1:{p}").parse()?;
-        TcpStream::connect_timeout(&addr, Duration::from_secs(1))
+        let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(1))
             .with_context(|| format!("MySQL not accepting connections on port {p}"))?;
+        stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+        // MySQL sends a 4-byte packet header on connect; first payload byte is 0x0a (protocol v10).
+        let mut header = [0u8; 5];
+        stream.read_exact(&mut header)?;
+        anyhow::ensure!(
+            header[4] == 0x0a,
+            "MySQL on port {p} returned unexpected protocol byte"
+        );
         Ok(())
     }
 }
@@ -88,12 +106,13 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    fn dep_with_extra(extra: HashMap<String, serde_yaml::Value>) -> Dependency {
+    fn dep_with_extra(extra: HashMap<String, crate::config::ExtraValue>) -> Dependency {
         Dependency {
             name: "mysql".into(),
             version: None,
             tap: None,
             after_install: None,
+            shell: None,
             extra,
         }
     }
@@ -103,23 +122,40 @@ mod tests {
     #[test]
     fn port_defaults_to_3306() {
         let dep = Dependency::simple("mysql");
-        assert_eq!(port(&dep), 3306);
+        assert_eq!(port(&dep).unwrap(), 3306);
     }
 
     #[test]
     fn port_reads_custom_value() {
         let mut extra = HashMap::new();
-        extra.insert("port".into(), serde_yaml::Value::Number(3307.into()));
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(3307.into()),
+        );
         let dep = dep_with_extra(extra);
-        assert_eq!(port(&dep), 3307);
+        assert_eq!(port(&dep).unwrap(), 3307);
     }
 
     #[test]
     fn port_ignores_non_numeric_value() {
         let mut extra = HashMap::new();
-        extra.insert("port".into(), serde_yaml::Value::String("bogus".into()));
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::String("bogus".into()),
+        );
         let dep = dep_with_extra(extra);
-        assert_eq!(port(&dep), 3306);
+        assert_eq!(port(&dep).unwrap(), 3306);
+    }
+
+    #[test]
+    fn port_bails_on_out_of_range() {
+        let mut extra = HashMap::new();
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(99999.into()),
+        );
+        let dep = dep_with_extra(extra);
+        assert!(port(&dep).is_err());
     }
 
     // ── cli_args ──────────────────────────────────────────────────────────────
@@ -135,7 +171,7 @@ mod tests {
         let mut extra = HashMap::new();
         extra.insert(
             "cli_args".into(),
-            serde_yaml::Value::String("--innodb-buffer-pool-size=256M".into()),
+            crate::config::ExtraValue::String("--innodb-buffer-pool-size=256M".into()),
         );
         let dep = dep_with_extra(extra);
         assert_eq!(
@@ -154,7 +190,10 @@ mod tests {
     #[test]
     fn mysql_health_check_fails_on_unused_port() {
         let mut extra = HashMap::new();
-        extra.insert("port".into(), serde_yaml::Value::Number(19999u64.into()));
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(19999u64.into()),
+        );
         let dep = dep_with_extra(extra);
         let err = MysqlModule.health_check(&dep).unwrap_err();
         assert!(err.to_string().contains("19999"));
@@ -224,7 +263,7 @@ mod tests {
     }
 
     #[test]
-    fn install_writes_config_when_custom_port_and_config_dir_available() {
+    fn post_setup_writes_config_when_custom_port_and_config_dir_available() {
         let dir = std::env::temp_dir().join(format!("devy_mysql_test_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pm = crate::package_manager::MockPackageManager {
@@ -232,17 +271,21 @@ mod tests {
             ..Default::default()
         };
         let mut extra = HashMap::new();
-        extra.insert("port".into(), serde_yaml::Value::Number(3307u64.into()));
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(3307u64.into()),
+        );
         let dep = dep_with_extra(extra);
-        MysqlModule.install(&pm, &dep).unwrap();
+        MysqlModule
+            .post_setup(&dep, &pm, std::path::Path::new("/tmp"))
+            .unwrap();
         let content = std::fs::read_to_string(dir.join("my.cnf")).unwrap();
         assert!(content.contains("port = 3307"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn install_writes_config_when_default_port_but_cli_args_set() {
-        // Tests the || condition: even with default port, cli_args trigger config write.
+    fn post_setup_writes_config_when_default_port_but_cli_args_set() {
         let dir = std::env::temp_dir().join(format!("devy_mysql_test_args_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pm = crate::package_manager::MockPackageManager {
@@ -252,18 +295,19 @@ mod tests {
         let mut extra = HashMap::new();
         extra.insert(
             "cli_args".into(),
-            serde_yaml::Value::String("--innodb-buffer-pool-size=256M".into()),
+            crate::config::ExtraValue::String("--innodb-buffer-pool-size=256M".into()),
         );
         let dep = dep_with_extra(extra);
-        MysqlModule.install(&pm, &dep).unwrap();
+        MysqlModule
+            .post_setup(&dep, &pm, std::path::Path::new("/tmp"))
+            .unwrap();
         let content = std::fs::read_to_string(dir.join("my.cnf")).unwrap();
         assert!(content.contains("innodb-buffer-pool-size"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn install_skips_config_when_default_port_no_args() {
-        // With default port and no cli_args, config file should NOT be written.
+    fn post_setup_skips_config_when_default_port_no_args() {
         let dir = std::env::temp_dir().join(format!("devy_mysql_test_skip_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pm = crate::package_manager::MockPackageManager {
@@ -271,7 +315,9 @@ mod tests {
             ..Default::default()
         };
         let dep = Dependency::simple("mysql");
-        MysqlModule.install(&pm, &dep).unwrap();
+        MysqlModule
+            .post_setup(&dep, &pm, std::path::Path::new("/tmp"))
+            .unwrap();
         assert!(!dir.join("my.cnf").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }

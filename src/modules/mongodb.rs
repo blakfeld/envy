@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use std::borrow::Cow;
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
 
@@ -18,16 +19,19 @@ fn package_name(pm: &dyn PackageManager) -> &'static str {
     }
 }
 
-fn port(dep: &Dependency) -> u16 {
-    dep.extra
-        .get("port")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(27017) as u16
+fn port(dep: &Dependency) -> anyhow::Result<u16> {
+    super::extra_port(dep, "port", 27017)
 }
 
 impl Module for MongodbModule {
     fn is_service(&self) -> bool {
         true
+    }
+    fn default_port(&self) -> Option<u16> {
+        Some(27017)
+    }
+    fn known_extra_keys(&self) -> Option<&'static [&'static str]> {
+        Some(&["port"])
     }
 
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
@@ -36,6 +40,14 @@ impl Module for MongodbModule {
 
     fn install(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<()> {
         pm.install_package(&pm_dep(dep, package_name(pm)))
+    }
+
+    fn service_name<'a>(&self, _dep: &'a Dependency) -> Cow<'a, str> {
+        if cfg!(target_os = "linux") {
+            Cow::Borrowed("mongod")
+        } else {
+            Cow::Borrowed("mongodb-community")
+        }
     }
 
     fn is_running(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
@@ -50,8 +62,15 @@ impl Module for MongodbModule {
         pm.stop_service(&self.service_name(dep))
     }
 
+    fn service_config(&self) -> super::ServiceConfig {
+        super::ServiceConfig {
+            health_check_max_attempts: 60,
+            ..Default::default()
+        }
+    }
+
     fn health_check(&self, dep: &Dependency) -> Result<()> {
-        let p = port(dep);
+        let p = port(dep)?;
         let addr: SocketAddr = format!("127.0.0.1:{p}").parse()?;
         TcpStream::connect_timeout(&addr, Duration::from_secs(1))
             .with_context(|| format!("MongoDB not accepting connections on port {p}"))?;
@@ -69,15 +88,31 @@ mod tests {
     }
 
     #[test]
+    fn service_name_ignores_dep_name() {
+        let expected = if cfg!(target_os = "linux") {
+            "mongod"
+        } else {
+            "mongodb-community"
+        };
+        let dep = Dependency::simple("mongodb");
+        assert_eq!(MongodbModule.service_name(&dep).as_ref(), expected);
+        let dep2 = Dependency::simple("mongo");
+        assert_eq!(MongodbModule.service_name(&dep2).as_ref(), expected);
+    }
+
+    #[test]
     fn port_defaults_to_27017() {
         let dep = Dependency::simple("mongodb");
-        assert_eq!(port(&dep), 27017);
+        assert_eq!(port(&dep).unwrap(), 27017);
     }
 
     #[test]
     fn mongodb_health_check_fails_on_unused_port() {
         let mut extra = std::collections::HashMap::new();
-        extra.insert("port".into(), serde_yaml::Value::Number(19996u64.into()));
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(19996u64.into()),
+        );
         let dep = Dependency::with_extra("mongodb", extra);
         assert!(MongodbModule.health_check(&dep).is_err());
     }

@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
+use std::borrow::Cow;
 use std::fs;
+use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::Path;
 use std::time::Duration;
@@ -20,11 +22,8 @@ fn package_name(pm: &dyn PackageManager) -> &'static str {
     }
 }
 
-fn port(dep: &Dependency) -> u16 {
-    dep.extra
-        .get("port")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(5432) as u16
+fn port(dep: &Dependency) -> anyhow::Result<u16> {
+    super::extra_port(dep, "port", 5432)
 }
 
 fn write_config(config_dir: &Path, port: u16) -> Result<()> {
@@ -39,15 +38,28 @@ impl Module for PostgresModule {
     fn is_service(&self) -> bool {
         true
     }
+    fn default_port(&self) -> Option<u16> {
+        Some(5432)
+    }
+    fn known_extra_keys(&self) -> Option<&'static [&'static str]> {
+        Some(&["port"])
+    }
 
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
         pm.is_package_installed(&pm_dep(dep, package_name(pm)))
     }
 
     fn install(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<()> {
-        pm.install_package(&pm_dep(dep, package_name(pm)))?;
+        pm.install_package(&pm_dep(dep, package_name(pm)))
+    }
 
-        let p = port(dep);
+    fn post_setup(
+        &self,
+        dep: &Dependency,
+        pm: &dyn PackageManager,
+        _project_root: &std::path::Path,
+    ) -> Result<()> {
+        let p = port(dep)?;
         if p != 5432 {
             match pm.service_config_dir("postgresql") {
                 Some(config_dir) => write_config(&config_dir, p)?,
@@ -59,8 +71,11 @@ impl Module for PostgresModule {
                 }
             }
         }
-
         Ok(())
+    }
+
+    fn service_name<'a>(&self, _dep: &'a Dependency) -> Cow<'a, str> {
+        Cow::Borrowed("postgresql")
     }
 
     fn is_running(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
@@ -76,10 +91,22 @@ impl Module for PostgresModule {
     }
 
     fn health_check(&self, dep: &Dependency) -> Result<()> {
-        let p = port(dep);
+        let p = port(dep)?;
         let addr: SocketAddr = format!("127.0.0.1:{p}").parse()?;
-        TcpStream::connect_timeout(&addr, Duration::from_secs(1))
+        let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(1))
             .with_context(|| format!("PostgreSQL not accepting connections on port {p}"))?;
+        stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+        // Send a minimal StartupMessage to trigger an auth response ('R') or error ('E').
+        // Message format: length (4 bytes BE) + protocol version 3.0 (4 bytes BE).
+        let msg: &[u8] = &[0x00, 0x00, 0x00, 0x08, 0x00, 0x03, 0x00, 0x00];
+        stream.write_all(msg)?;
+        let mut first = [0u8; 1];
+        stream.read_exact(&mut first)?;
+        anyhow::ensure!(
+            first[0] == b'R' || first[0] == b'E',
+            "PostgreSQL on port {p} returned unexpected startup response byte: 0x{:02x}",
+            first[0]
+        );
         Ok(())
     }
 }
@@ -91,7 +118,10 @@ mod tests {
 
     fn dep_with_port(port: u64) -> Dependency {
         let mut extra = HashMap::new();
-        extra.insert("port".into(), serde_yaml::Value::Number(port.into()));
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(port.into()),
+        );
         Dependency::with_extra("postgresql", extra)
     }
 
@@ -101,15 +131,29 @@ mod tests {
     }
 
     #[test]
+    fn service_name_is_always_postgresql() {
+        let dep = Dependency::simple("postgresql");
+        assert_eq!(PostgresModule.service_name(&dep).as_ref(), "postgresql");
+        let dep2 = Dependency::simple("postgres");
+        assert_eq!(PostgresModule.service_name(&dep2).as_ref(), "postgresql");
+    }
+
+    #[test]
     fn port_defaults_to_5432() {
         let dep = Dependency::simple("postgresql");
-        assert_eq!(port(&dep), 5432);
+        assert_eq!(port(&dep).unwrap(), 5432);
     }
 
     #[test]
     fn port_reads_custom_value() {
         let dep = dep_with_port(5433);
-        assert_eq!(port(&dep), 5433);
+        assert_eq!(port(&dep).unwrap(), 5433);
+    }
+
+    #[test]
+    fn port_bails_on_out_of_range() {
+        let dep = dep_with_port(99999);
+        assert!(port(&dep).is_err());
     }
 
     #[test]
@@ -121,11 +165,10 @@ mod tests {
 
     #[test]
     fn write_config_creates_conf_file() {
-        let dir = std::env::temp_dir().join(format!("devy_pg_test_{}", std::process::id()));
+        let dir = crate::test_support::tmp_dir();
         write_config(&dir, 5433).unwrap();
         let content = std::fs::read_to_string(dir.join("devy.conf")).unwrap();
         assert!(content.contains("port = 5433"));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -192,32 +235,32 @@ mod tests {
     }
 
     #[test]
-    fn install_writes_config_for_non_default_port() {
-        let dir = std::env::temp_dir().join(format!("devy_pg_install_{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+    fn post_setup_writes_config_for_non_default_port() {
+        let dir = crate::test_support::tmp_dir();
         let pm = crate::package_manager::MockPackageManager {
-            config_dir: Some(dir.clone()),
+            config_dir: Some(dir.to_path_buf()),
             ..Default::default()
         };
         let dep = dep_with_port(5433);
-        PostgresModule.install(&pm, &dep).unwrap();
+        PostgresModule
+            .post_setup(&dep, &pm, std::path::Path::new("/tmp"))
+            .unwrap();
         let content = std::fs::read_to_string(dir.join("devy.conf")).unwrap();
         assert!(content.contains("port = 5433"));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn install_skips_config_for_default_port() {
-        let dir = std::env::temp_dir().join(format!("devy_pg_skip_{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+    fn post_setup_skips_config_for_default_port() {
+        let dir = crate::test_support::tmp_dir();
         let pm = crate::package_manager::MockPackageManager {
-            config_dir: Some(dir.clone()),
+            config_dir: Some(dir.to_path_buf()),
             ..Default::default()
         };
         let dep = Dependency::simple("postgresql");
-        PostgresModule.install(&pm, &dep).unwrap();
+        PostgresModule
+            .post_setup(&dep, &pm, std::path::Path::new("/tmp"))
+            .unwrap();
         assert!(!dir.join("devy.conf").exists());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

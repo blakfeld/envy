@@ -5,14 +5,25 @@ use which::which;
 
 use super::PackageManager;
 use crate::config::Dependency;
+use crate::output;
 
+#[derive(Default)]
 pub struct Homebrew;
 
-/// Returns true when the services output contains a line for `name` that shows "started".
-fn parse_brew_service_running(stdout: &str, name: &str) -> bool {
-    stdout
-        .lines()
-        .any(|line| line.starts_with(name) && line.contains("started"))
+/// Parses `brew services info --json` output and returns whether the service is running.
+/// The JSON is an array; the first element has a `"running"` boolean field.
+fn parse_brew_service_info_json(stdout: &[u8]) -> Result<bool> {
+    let json: serde_json::Value =
+        serde_json::from_slice(stdout).context("Failed to parse `brew services info` JSON")?;
+    let arr = json
+        .as_array()
+        .context("`brew services info` output was not a JSON array")?;
+    if arr.is_empty() {
+        anyhow::bail!(
+            "`brew services info` returned an empty array — service may not be managed by brew"
+        );
+    }
+    Ok(arr[0]["running"].as_bool().unwrap_or(false))
 }
 
 /// Parses `brew list --versions` output and extracts the version (second whitespace token).
@@ -21,16 +32,18 @@ fn parse_brew_version(line: &str) -> Option<String> {
 }
 
 impl Homebrew {
-    pub fn new() -> Self {
-        Self
-    }
-
-    fn brew_bin(&self) -> &'static str {
-        if cfg!(target_arch = "aarch64") {
+    fn brew_bin(&self) -> String {
+        if let Ok(prefix) = std::env::var("HOMEBREW_PREFIX")
+            && !prefix.is_empty()
+        {
+            return format!("{prefix}/bin/brew");
+        }
+        let default = if cfg!(target_arch = "aarch64") {
             "/opt/homebrew/bin/brew"
         } else {
             "/usr/local/bin/brew"
-        }
+        };
+        default.to_string()
     }
 
     fn run(&self, args: &[&str]) -> Result<std::process::Output> {
@@ -50,6 +63,18 @@ impl Homebrew {
         }
         Ok(())
     }
+
+    fn fetch_config_dir(&self, service: &str) -> Option<PathBuf> {
+        let output = Command::new(self.brew_bin())
+            .args(["--prefix", service])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let prefix = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Some(std::path::Path::new(&prefix).join("etc"))
+    }
 }
 
 impl PackageManager for Homebrew {
@@ -61,11 +86,25 @@ impl PackageManager for Homebrew {
         which("brew").is_ok()
     }
 
+    /// Installs Homebrew by fetching and executing the official install script.
+    /// This is the only supported installation method. The script is fetched over
+    /// HTTPS from raw.githubusercontent.com and executed via bash — no hash
+    /// verification is performed. Users in high-security environments should
+    /// install Homebrew manually before running `devy up`.
+    /// Set `DEVY_NO_BOOTSTRAP=1` to bail instead of running the installer.
     fn bootstrap(&self) -> Result<()> {
+        if std::env::var_os("DEVY_NO_BOOTSTRAP").is_some() {
+            bail!(
+                "Homebrew is not installed and DEVY_NO_BOOTSTRAP is set.\n\
+                 Install Homebrew manually: https://brew.sh"
+            );
+        }
+        output::step("Bootstrapping Homebrew (fetching install script from GitHub via bash)");
+        output::warn("No hash verification is performed. See https://brew.sh for manual install.");
         let status = Command::new("sh")
             .arg("-c")
             .arg(concat!(
-                "curl -fsSL ",
+                "curl --connect-timeout 30 --max-time 300 -fsSL ",
                 "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh",
                 " | bash"
             ))
@@ -96,9 +135,11 @@ impl PackageManager for Homebrew {
     }
 
     fn is_service_running(&self, name: &str) -> Result<bool> {
-        let output = self.run(&["services", "list"])?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(parse_brew_service_running(&stdout, name))
+        let output = self.run(&["services", "info", "--json", name])?;
+        if !output.status.success() {
+            return Ok(false);
+        }
+        parse_brew_service_info_json(&output.stdout)
     }
 
     fn start_service(&self, name: &str) -> Result<()> {
@@ -117,24 +158,22 @@ impl PackageManager for Homebrew {
         Ok(parse_brew_version(line))
     }
 
-    /// Runs `brew --prefix <service>` as a subprocess — not cheap to call in a loop.
     fn service_config_dir(&self, service: &str) -> Option<PathBuf> {
-        let output = Command::new(self.brew_bin())
-            .args(["--prefix", service])
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
+        self.fetch_config_dir(service)
+    }
+
+    fn validate_config(&self, dep: &Dependency) -> Result<()> {
+        if let Some(ref tap) = dep.tap {
+            validate_tap(tap).with_context(|| format!("{}: invalid tap", dep.name))?;
         }
-        let prefix = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Some(std::path::Path::new(&prefix).join("etc"))
+        Ok(())
     }
 }
 
 /// Validates that a tap string has the form `org/repo` with no path components,
 /// URL schemes, or shell-special characters. Prevents arbitrary GitHub repos from
 /// being added via a malicious devy.yml tap field.
-fn validate_tap(tap: &str) -> Result<()> {
+pub(crate) fn validate_tap(tap: &str) -> Result<()> {
     let parts: Vec<&str> = tap.split('/').collect();
     if parts.len() != 2 {
         bail!(
@@ -193,7 +232,7 @@ mod tests {
 
     #[test]
     fn brew_bin_returns_non_empty_path() {
-        let b = Homebrew::new().brew_bin();
+        let b = Homebrew::default().brew_bin();
         assert!(!b.is_empty(), "brew_bin must not be empty");
         assert!(
             b.contains("brew"),
@@ -202,43 +241,115 @@ mod tests {
     }
 
     #[test]
-    fn brew_bin_is_not_xyzzy() {
-        assert_ne!(Homebrew::new().brew_bin(), "xyzzy");
+    fn brew_bin_uses_homebrew_prefix_env_var() {
+        let _guard = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var("HOMEBREW_PREFIX").ok();
+        // SAFETY: serialised by ENV_LOCK; HOMEBREW_PREFIX is only read by brew_bin().
+        unsafe { std::env::set_var("HOMEBREW_PREFIX", "/custom/homebrew") };
+        let result = Homebrew::default().brew_bin();
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("HOMEBREW_PREFIX", v),
+                None => std::env::remove_var("HOMEBREW_PREFIX"),
+            }
+        }
+        assert_eq!(result, "/custom/homebrew/bin/brew");
+    }
+
+    #[test]
+    fn brew_bin_falls_back_to_hardcoded_when_prefix_absent() {
+        let _guard = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var("HOMEBREW_PREFIX").ok();
+        // SAFETY: serialised by ENV_LOCK; HOMEBREW_PREFIX is only read by brew_bin().
+        unsafe { std::env::remove_var("HOMEBREW_PREFIX") };
+        let result = Homebrew::default().brew_bin();
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("HOMEBREW_PREFIX", v),
+                None => std::env::remove_var("HOMEBREW_PREFIX"),
+            }
+        }
+        assert!(result.contains("homebrew") || result.contains("local"));
+        assert!(result.ends_with("/bin/brew"));
     }
 
     // ── name ──────────────────────────────────────────────────────────────────
 
     #[test]
     fn brew_name_is_brew() {
-        assert_eq!(Homebrew::new().name(), "brew");
+        assert_eq!(Homebrew::default().name(), "brew");
     }
 
-    // ── parse_brew_service_running ────────────────────────────────────────────
+    // ── parse_brew_service_info_json ─────────────────────────────────────────
 
     #[test]
-    fn parse_brew_service_running_started() {
-        let stdout = "mysql started /some/path\nnginx stopped\n";
-        assert!(parse_brew_service_running(stdout, "mysql"));
-        assert!(!parse_brew_service_running(stdout, "nginx"));
+    fn parse_brew_service_info_json_returns_true_when_running() {
+        let json = br#"[{"name":"mysql","running":true}]"#;
+        assert!(parse_brew_service_info_json(json).unwrap());
     }
 
     #[test]
-    fn parse_brew_service_running_requires_both_conditions() {
-        let stdout = "nginx stopped\n";
+    fn parse_brew_service_info_json_returns_false_when_stopped() {
+        let json = br#"[{"name":"mysql","running":false}]"#;
+        assert!(!parse_brew_service_info_json(json).unwrap());
+    }
+
+    #[test]
+    fn parse_brew_service_info_json_returns_false_on_malformed_json() {
+        let bad = b"not json";
+        assert!(parse_brew_service_info_json(bad).is_err());
+    }
+
+    #[test]
+    fn parse_brew_service_info_json_returns_false_when_running_absent() {
+        // "running" key missing — default to false (service status unknown = not running)
+        let json = br#"[{"name":"mysql","status":"stopped"}]"#;
+        assert!(!parse_brew_service_info_json(json).unwrap());
+    }
+
+    #[test]
+    fn parse_brew_service_info_json_returns_err_on_empty_array() {
+        // Empty array means brew does not manage the service — must error, not silently return false.
+        let json = b"[]";
         assert!(
-            !parse_brew_service_running(stdout, "nginx"),
-            "stopped service must not report as running"
-        );
-        let stdout2 = "other started\nnginx none\n";
-        assert!(
-            !parse_brew_service_running(stdout2, "nginx"),
-            "nginx must not match 'other started' line"
+            parse_brew_service_info_json(json).is_err(),
+            "empty array must return Err, not silently return false"
         );
     }
 
     #[test]
-    fn parse_brew_service_running_empty_returns_false() {
-        assert!(!parse_brew_service_running("", "mysql"));
+    fn parse_brew_service_info_json_returns_err_on_non_array() {
+        let json = br#"{"name":"mysql","running":true}"#;
+        assert!(
+            parse_brew_service_info_json(json).is_err(),
+            "non-array JSON must return Err"
+        );
+    }
+
+    // ── bootstrap ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn bootstrap_returns_err_when_devy_no_bootstrap_set() {
+        let _guard = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // SAFETY: serialised by ENV_LOCK; DEVY_NO_BOOTSTRAP is only read by bootstrap().
+        unsafe { std::env::set_var("DEVY_NO_BOOTSTRAP", "1") };
+        let result = Homebrew::default().bootstrap();
+        unsafe { std::env::remove_var("DEVY_NO_BOOTSTRAP") };
+        assert!(
+            result.is_err(),
+            "bootstrap must bail when DEVY_NO_BOOTSTRAP is set"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("DEVY_NO_BOOTSTRAP"),
+            "error must mention DEVY_NO_BOOTSTRAP, got: {msg}"
+        );
     }
 
     // ── parse_brew_version ────────────────────────────────────────────────────

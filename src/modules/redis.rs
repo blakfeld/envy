@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
 
@@ -20,6 +21,12 @@ fn package_name(pm: &dyn PackageManager) -> &'static str {
 impl Module for RedisModule {
     fn is_service(&self) -> bool {
         true
+    }
+    fn default_port(&self) -> Option<u16> {
+        Some(6379)
+    }
+    fn known_extra_keys(&self) -> Option<&'static [&'static str]> {
+        Some(&["port"])
     }
 
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
@@ -43,14 +50,18 @@ impl Module for RedisModule {
     }
 
     fn health_check(&self, dep: &Dependency) -> Result<()> {
-        let port = dep
-            .extra
-            .get("port")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(6379) as u16;
+        let port = super::extra_port(dep, "port", 6379)?;
         let addr: SocketAddr = format!("127.0.0.1:{port}").parse()?;
-        TcpStream::connect_timeout(&addr, Duration::from_secs(1))
+        let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(1))
             .with_context(|| format!("Redis not accepting connections on port {port}"))?;
+        stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+        stream.write_all(b"PING\r\n")?;
+        let mut buf = [0u8; 7];
+        stream.read_exact(&mut buf)?;
+        anyhow::ensure!(
+            &buf == b"+PONG\r\n",
+            "Redis on port {port} returned unexpected PING response"
+        );
         Ok(())
     }
 }
@@ -68,7 +79,10 @@ mod tests {
     #[test]
     fn redis_health_check_fails_on_unused_port() {
         let mut extra = std::collections::HashMap::new();
-        extra.insert("port".into(), serde_yaml::Value::Number(19998u64.into()));
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(19998u64.into()),
+        );
         let dep = Dependency::with_extra("redis", extra);
         assert!(RedisModule.health_check(&dep).is_err());
     }

@@ -3,41 +3,50 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 
+/// Single place that names the YAML extra-value type.
+/// Swap the right-hand side here if the YAML library ever changes.
+pub type ExtraValue = serde_yml::Value;
+
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum RawCommand {
     Simple(String),
-    Configured(CommandConfig),
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct CommandConfig {
-    pub cmd: String,
-    pub cwd: Option<String>,
-    pub shell: Option<String>,
+    Configured {
+        cmd: String,
+        cwd: Option<String>,
+        shell: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
-pub struct EnvyCommand {
+pub struct DevyCommand {
     pub cmd: String,
     pub cwd: Option<String>,
     pub shell: String,
 }
 
-impl From<RawCommand> for EnvyCommand {
+pub(crate) fn default_shell() -> String {
+    if cfg!(target_os = "windows") {
+        "cmd".into()
+    } else {
+        "sh".into()
+    }
+}
+
+impl From<RawCommand> for DevyCommand {
     fn from(raw: RawCommand) -> Self {
         match raw {
-            RawCommand::Simple(cmd) => EnvyCommand {
+            RawCommand::Simple(cmd) => DevyCommand {
                 cmd,
                 cwd: None,
-                shell: "sh".into(),
+                shell: default_shell(),
             },
-            RawCommand::Configured(c) => EnvyCommand {
-                cmd: c.cmd,
-                cwd: c.cwd,
-                shell: c.shell.unwrap_or_else(|| "sh".into()),
+            RawCommand::Configured { cmd, cwd, shell } => DevyCommand {
+                cmd,
+                cwd,
+                shell: shell.unwrap_or_else(default_shell),
             },
         }
     }
@@ -60,15 +69,16 @@ pub enum HookAction {
 }
 
 impl HookAction {
-    pub fn commands(&self) -> Vec<&RawCommand> {
+    pub fn commands(&self) -> &[RawCommand] {
         match self {
-            HookAction::Single(cmd) => vec![cmd],
-            HookAction::List(cmds) => cmds.iter().collect(),
+            HookAction::Single(cmd) => std::slice::from_ref(cmd),
+            HookAction::List(cmds) => cmds.as_slice(),
         }
     }
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct HooksConfig {
     pub before_up: Option<HookAction>,
     pub after_up: Option<HookAction>,
@@ -78,8 +88,9 @@ pub struct HooksConfig {
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Deserialize)]
-pub struct EnvyConfig {
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DevyConfig {
     pub name: Option<String>,
     #[serde(default)]
     pub dependencies: Vec<RawDependency>,
@@ -94,9 +105,9 @@ pub struct EnvyConfig {
 /// Supports two forms in YAML:
 ///   - python
 ///   - mysql:
-///     - version: "8.1"
-///     - port: 3307
-#[derive(Debug, Deserialize)]
+///     version: "8.1"
+///     port: 3307
+#[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum RawDependency {
     Simple(String),
@@ -107,15 +118,18 @@ pub enum RawDependency {
 pub struct DepConfig {
     pub version: Option<String>,
     pub tap: Option<String>,
-    /// Shell command to run immediately after the dependency is freshly installed.
-    /// Runs once per install, not on subsequent `devy up` calls when the dep is
-    /// already present. Re-runs if the dep is removed and reinstalled (e.g. after
-    /// `devy up --update`). Not recorded in devy.lock, so not idempotent across
-    /// installs.
+    /// Shell command run immediately after the dependency is freshly installed.
+    /// Treat as arbitrary code execution — do not commit values from untrusted sources.
+    /// Runs once; will not re-run on subsequent `devy up` calls unless the package has
+    /// been fully removed from the system.
     pub after_install: Option<String>,
+    /// Shell interpreter used to run `after_install`. Defaults to `sh` (or `cmd` on Windows).
+    /// Must be a bare shell name from the allowed list: sh, bash, zsh, fish, cmd, powershell.
+    /// Paths (e.g. `/usr/bin/bash`) are not accepted.
+    pub shell: Option<String>,
     /// Module-specific keys (e.g. port, cli_args) are captured here.
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_yaml::Value>,
+    pub extra: HashMap<String, ExtraValue>,
 }
 
 /// Normalized, flat representation used throughout the rest of the codebase.
@@ -125,7 +139,9 @@ pub struct Dependency {
     pub version: Option<String>,
     pub tap: Option<String>,
     pub after_install: Option<String>,
-    pub extra: HashMap<String, serde_yaml::Value>,
+    /// Shell interpreter for `after_install`. `None` means use the platform default.
+    pub shell: Option<String>,
+    pub extra: HashMap<String, ExtraValue>,
 }
 
 impl Dependency {
@@ -135,12 +151,13 @@ impl Dependency {
             version: None,
             tap: None,
             after_install: None,
+            shell: None,
             extra: HashMap::new(),
         }
     }
 
     #[cfg(test)]
-    pub fn with_extra(name: &str, extra: HashMap<String, serde_yaml::Value>) -> Self {
+    pub fn with_extra(name: &str, extra: HashMap<String, ExtraValue>) -> Self {
         Self {
             extra,
             ..Self::simple(name)
@@ -155,22 +172,30 @@ impl Dependency {
     }
 }
 
-impl EnvyConfig {
+impl DevyConfig {
     pub fn load_default() -> Result<Self> {
-        let path = Self::find_config().ok_or_else(|| {
+        let start = std::env::current_dir().context("Failed to get current directory")?;
+        let path = Self::find_config(&start).ok_or_else(|| {
             anyhow::anyhow!("devy.yml not found — are you inside a devy project?")
         })?;
         Self::load(&path)
     }
 
-    /// Walks from the current directory up to the nearest `.git` root or `$HOME`,
+    /// Walks from `start` up to the nearest `.git` root or `$HOME`,
     /// whichever comes first, looking for `devy.yml`.
     ///
     /// Stopping at the git root prevents a malicious or unrelated `devy.yml` planted
     /// in a parent directory from being picked up and having its hooks executed.
-    pub(crate) fn find_config() -> Option<std::path::PathBuf> {
+    pub(crate) fn find_config(start: &std::path::Path) -> Option<std::path::PathBuf> {
+        // HOME is kept raw (non-canonicalized) for comparison because it may not
+        // exist on disk (canonicalize would fail and fall back to the raw path anyway,
+        // but a canonicalized `dir` would never match a raw HOME). Using raw paths on
+        // both sides makes the guard reliable regardless of whether HOME exists.
         let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
-        let mut dir = std::env::current_dir().ok()?;
+        // `dir` is canonicalized for filesystem checks (.git, devy.yml existence).
+        // `dir_raw` mirrors the same traversal without canonicalization for the HOME guard.
+        let mut dir = start.canonicalize().unwrap_or_else(|_| start.to_path_buf());
+        let mut dir_raw = start.to_path_buf();
         loop {
             let candidate = dir.join("devy.yml");
             if candidate.exists() {
@@ -182,11 +207,19 @@ impl EnvyConfig {
                 return None;
             }
             // Never walk above $HOME to limit blast radius in non-git trees.
-            if Some(&dir) == home.as_ref() {
+            // Compare raw paths so the guard fires even when HOME doesn't exist on disk.
+            if home.as_deref() == Some(dir_raw.as_path()) {
                 return None;
             }
             match dir.parent() {
-                Some(parent) => dir = parent.to_path_buf(),
+                Some(parent) => {
+                    dir = parent.to_path_buf();
+                    // Advance dir_raw in lock-step with dir.
+                    dir_raw = dir_raw
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| dir_raw.clone());
+                }
                 None => return None,
             }
         }
@@ -195,36 +228,38 @@ impl EnvyConfig {
     pub fn load(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
-        serde_yaml::from_str(&content)
-            .with_context(|| format!("Failed to parse {}", path.display()))
+        serde_yml::from_str(&content).with_context(|| format!("Failed to parse {}", path.display()))
     }
 
-    pub fn normalized_dependencies(&self) -> Vec<Dependency> {
-        self.dependencies
-            .iter()
-            .flat_map(|raw| match raw {
-                RawDependency::Simple(name) => vec![Dependency {
-                    name: name.clone(),
-                    version: None,
-                    tap: None,
-                    after_install: None,
-                    extra: HashMap::new(),
-                }],
-                RawDependency::Configured(map) => map
-                    .iter()
-                    .map(|(name, cfg)| {
+    pub fn normalized_dependencies(&self) -> Result<Vec<Dependency>> {
+        let mut result = Vec::new();
+        for raw in &self.dependencies {
+            match raw {
+                RawDependency::Simple(name) => result.push(Dependency::simple(name)),
+                RawDependency::Configured(map) => {
+                    if map.len() > 1 {
+                        let keys: Vec<&str> = map.keys().map(String::as_str).collect();
+                        anyhow::bail!(
+                            "dependency entry has multiple keys ({}); \
+                             each dependency must be its own list item",
+                            keys.join(", ")
+                        );
+                    }
+                    for (name, cfg) in map {
                         let cfg = cfg.clone().unwrap_or_default();
-                        Dependency {
+                        result.push(Dependency {
                             name: name.clone(),
                             version: cfg.version,
                             tap: cfg.tap,
                             after_install: cfg.after_install,
+                            shell: cfg.shell,
                             extra: cfg.extra,
-                        }
-                    })
-                    .collect(),
-            })
-            .collect()
+                        });
+                    }
+                }
+            }
+        }
+        Ok(result)
     }
 }
 
@@ -232,51 +267,43 @@ impl EnvyConfig {
 mod tests {
     use super::*;
 
-    fn tmp_dir() -> std::path::PathBuf {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static N: AtomicU64 = AtomicU64::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "devy_cfg_{}_{}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+    fn tmp_dir() -> crate::test_support::TempDir {
+        crate::test_support::tmp_dir()
     }
 
-    // ── EnvyCommand::from ─────────────────────────────────────────────────────
+    // ── DevyCommand::from ─────────────────────────────────────────────────────
 
     #[test]
-    fn from_simple_defaults_to_sh() {
+    fn from_simple_defaults_to_platform_shell() {
         let raw = RawCommand::Simple("echo hi".into());
-        let cmd = EnvyCommand::from(raw);
+        let cmd = DevyCommand::from(raw);
         assert_eq!(cmd.cmd, "echo hi");
-        assert_eq!(cmd.shell, "sh");
+        assert_eq!(cmd.shell, default_shell());
         assert!(cmd.cwd.is_none());
     }
 
     #[test]
     fn from_configured_uses_custom_shell_and_cwd() {
-        let raw = RawCommand::Configured(CommandConfig {
+        let raw = RawCommand::Configured {
             cmd: "make build".into(),
             cwd: Some("/tmp".into()),
             shell: Some("bash".into()),
-        });
-        let cmd = EnvyCommand::from(raw);
+        };
+        let cmd = DevyCommand::from(raw);
         assert_eq!(cmd.cmd, "make build");
         assert_eq!(cmd.shell, "bash");
         assert_eq!(cmd.cwd, Some("/tmp".into()));
     }
 
     #[test]
-    fn from_configured_shell_none_defaults_to_sh() {
-        let raw = RawCommand::Configured(CommandConfig {
+    fn from_configured_shell_none_defaults_to_platform_shell() {
+        let raw = RawCommand::Configured {
             cmd: "echo".into(),
             cwd: None,
             shell: None,
-        });
-        let cmd = EnvyCommand::from(raw);
-        assert_eq!(cmd.shell, "sh");
+        };
+        let cmd = DevyCommand::from(raw);
+        assert_eq!(cmd.shell, default_shell());
         assert!(cmd.cwd.is_none());
     }
 
@@ -295,18 +322,19 @@ mod tests {
             version: Some("20".into()),
             tap: None,
             after_install: None,
+            shell: None,
             extra: HashMap::new(),
         };
         assert_eq!(dep.versioned_name(), "node@20");
     }
 
-    // ── EnvyConfig::normalized_dependencies ──────────────────────────────────
+    // ── DevyConfig::normalized_dependencies ──────────────────────────────────
 
     #[test]
     fn normalized_deps_simple_included() {
         let yaml = "dependencies:\n  - node\n  - python\n";
-        let config: EnvyConfig = serde_yaml::from_str(yaml).unwrap();
-        let deps = config.normalized_dependencies();
+        let config: DevyConfig = serde_yml::from_str(yaml).unwrap();
+        let deps = config.normalized_dependencies().unwrap();
         let names: Vec<_> = deps.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"node"));
         assert!(names.contains(&"python"));
@@ -315,8 +343,8 @@ mod tests {
     #[test]
     fn normalized_deps_version_preserved() {
         let yaml = "dependencies:\n  - node:\n      version: \"20\"\n";
-        let config: EnvyConfig = serde_yaml::from_str(yaml).unwrap();
-        let deps = config.normalized_dependencies();
+        let config: DevyConfig = serde_yml::from_str(yaml).unwrap();
+        let deps = config.normalized_dependencies().unwrap();
         assert_eq!(deps[0].version, Some("20".into()));
     }
 
@@ -324,8 +352,8 @@ mod tests {
     fn normalized_deps_after_install_preserved() {
         let yaml =
             "dependencies:\n  - mysql:\n      after_install: \"mysql_secure_installation\"\n";
-        let config: EnvyConfig = serde_yaml::from_str(yaml).unwrap();
-        let deps = config.normalized_dependencies();
+        let config: DevyConfig = serde_yml::from_str(yaml).unwrap();
+        let deps = config.normalized_dependencies().unwrap();
         assert_eq!(
             deps[0].after_install.as_deref(),
             Some("mysql_secure_installation")
@@ -333,28 +361,83 @@ mod tests {
     }
 
     #[test]
+    fn normalized_deps_shell_preserved() {
+        let yaml =
+            "dependencies:\n  - mysql:\n      after_install: \"echo done\"\n      shell: bash\n";
+        let config: DevyConfig = serde_yml::from_str(yaml).unwrap();
+        let deps = config.normalized_dependencies().unwrap();
+        assert_eq!(deps[0].shell.as_deref(), Some("bash"));
+        // shell must not appear in extra once promoted to a first-class field.
+        assert!(
+            !deps[0].extra.contains_key("shell"),
+            "shell must not appear in dep.extra"
+        );
+    }
+
+    #[test]
+    fn normalized_deps_shell_absent_is_none() {
+        let yaml = "dependencies:\n  - node\n";
+        let config: DevyConfig = serde_yml::from_str(yaml).unwrap();
+        let deps = config.normalized_dependencies().unwrap();
+        assert!(deps[0].shell.is_none());
+    }
+
+    #[test]
     fn normalized_deps_after_install_absent_is_none() {
         let yaml = "dependencies:\n  - node\n";
-        let config: EnvyConfig = serde_yaml::from_str(yaml).unwrap();
-        let deps = config.normalized_dependencies();
+        let config: DevyConfig = serde_yml::from_str(yaml).unwrap();
+        let deps = config.normalized_dependencies().unwrap();
         assert!(deps[0].after_install.is_none());
     }
 
-    // ── EnvyConfig::load ──────────────────────────────────────────────────────
+    #[test]
+    fn normalized_deps_multi_key_configured_returns_err() {
+        let mut map = std::collections::HashMap::new();
+        map.insert("mysql".to_string(), None);
+        map.insert("redis".to_string(), None);
+        let config = DevyConfig {
+            name: None,
+            dependencies: vec![RawDependency::Configured(map)],
+            environment: HashMap::new(),
+            commands: HashMap::new(),
+            hooks: Default::default(),
+        };
+        assert!(
+            config.normalized_dependencies().is_err(),
+            "multi-key Configured entry must return Err"
+        );
+    }
+
+    #[test]
+    fn normalized_deps_single_key_configured_succeeds() {
+        let mut map = std::collections::HashMap::new();
+        map.insert("mysql".to_string(), None);
+        let config = DevyConfig {
+            name: None,
+            dependencies: vec![RawDependency::Configured(map)],
+            environment: HashMap::new(),
+            commands: HashMap::new(),
+            hooks: Default::default(),
+        };
+        let deps = config.normalized_dependencies().unwrap();
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].name, "mysql");
+    }
+
+    // ── DevyConfig::load ──────────────────────────────────────────────────────
 
     #[test]
     fn load_valid_yaml_ok() {
         let dir = tmp_dir();
         let path = dir.join("devy.yml");
         std::fs::write(&path, "name: test\n").unwrap();
-        assert!(EnvyConfig::load(&path).is_ok());
-        let _ = std::fs::remove_dir_all(&dir);
+        assert!(DevyConfig::load(&path).is_ok());
     }
 
     #[test]
     fn load_missing_file_err() {
         let path = std::path::Path::new("/nonexistent/devy_test_missing.yml");
-        assert!(EnvyConfig::load(path).is_err());
+        assert!(DevyConfig::load(path).is_err());
     }
 
     #[test]
@@ -362,91 +445,137 @@ mod tests {
         let dir = tmp_dir();
         let path = dir.join("devy.yml");
         std::fs::write(&path, "dependencies: [unclosed\n").unwrap();
-        assert!(EnvyConfig::load(&path).is_err());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    // ── EnvyConfig::find_config ───────────────────────────────────────────────
-
-    // Helper: changes cwd to `dir`, calls find_config, restores cwd.
-    // NOTE: std::env::set_current_dir is not thread-safe. Tests using this
-    // helper are serialised by ENV_CD_LOCK to avoid interfering with other tests.
-    static ENV_CD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    fn with_cwd<F: FnOnce() -> Option<std::path::PathBuf>>(
-        dir: &std::path::Path,
-        f: F,
-    ) -> Option<std::path::PathBuf> {
-        let _guard = ENV_CD_LOCK.lock().unwrap();
-        let orig = std::env::current_dir().ok();
-        std::env::set_current_dir(dir).unwrap();
-        let result = f();
-        if let Some(o) = orig {
-            let _ = std::env::set_current_dir(o);
-        }
-        result
+        assert!(DevyConfig::load(&path).is_err());
     }
 
     #[test]
+    fn load_unknown_top_level_key_returns_err() {
+        let dir = tmp_dir();
+        let path = dir.join("devy.yml");
+        std::fs::write(&path, "dependecies:\n  - node\n").unwrap();
+        assert!(
+            DevyConfig::load(&path).is_err(),
+            "unknown top-level key must be rejected"
+        );
+    }
+
+    #[test]
+    fn load_unknown_hook_key_returns_err() {
+        let dir = tmp_dir();
+        let path = dir.join("devy.yml");
+        std::fs::write(&path, "hooks:\n  before_Up: \"echo hi\"\n").unwrap();
+        assert!(
+            DevyConfig::load(&path).is_err(),
+            "typo'd hook name must be rejected, not silently ignored"
+        );
+    }
+
+    // ── DevyConfig::find_config ───────────────────────────────────────────────
+
+    #[test]
     fn find_config_finds_file_at_git_root_from_subdirectory() {
-        // Layout: root/.git, root/devy.yml, root/a/b/ (CWD)
+        // Layout: root/.git, root/devy.yml, root/a/b/ (start)
         let root = tmp_dir();
         let sub = root.join("a").join("b");
         std::fs::create_dir_all(&sub).unwrap();
         std::fs::create_dir_all(root.join(".git")).unwrap();
         std::fs::write(root.join("devy.yml"), "name: test\n").unwrap();
 
-        let found = with_cwd(&sub, EnvyConfig::find_config);
+        let found = DevyConfig::find_config(&sub);
         let expected = root.canonicalize().unwrap().join("devy.yml");
         assert_eq!(found, Some(expected));
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn find_config_stops_at_git_root_when_no_devy_yml() {
-        // Layout: root/.git (no devy.yml), root/a/ (CWD)
+        // Layout: root/.git (no devy.yml), root/a/ (start)
         let root = tmp_dir();
         let sub = root.join("a");
         std::fs::create_dir_all(&sub).unwrap();
         std::fs::create_dir_all(root.join(".git")).unwrap();
 
-        let found = with_cwd(&sub, EnvyConfig::find_config);
+        let found = DevyConfig::find_config(&sub);
         assert!(found.is_none());
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn find_config_finds_devy_yml_in_current_dir() {
-        // devy.yml in CWD itself — no walking needed.
+        // devy.yml in the start dir itself — no walking needed.
         let root = tmp_dir();
         std::fs::create_dir_all(root.join(".git")).unwrap();
         std::fs::write(root.join("devy.yml"), "name: test\n").unwrap();
 
-        let found = with_cwd(&root, EnvyConfig::find_config);
+        let found = DevyConfig::find_config(&root);
         let expected = root.canonicalize().unwrap().join("devy.yml");
         assert_eq!(found, Some(expected));
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn find_config_returns_none_in_dir_with_no_git_and_no_devy_yml() {
-        // A temp dir with no .git and no devy.yml above it (up to HOME).
-        // create a two-level hierarchy so it has a parent to walk to.
+    fn find_config_returns_none_when_no_git_and_no_devy_yml_up_to_home() {
+        // Layout: root/ (used as HOME bound), root/inner/ (start). No .git, no devy.yml.
+        // Pass root as HOME via the env var so the walk is bounded without relying on the
+        // real HOME — and we never mutate CWD, so no cross-test races.
         let root = tmp_dir();
         let sub = root.join("inner");
         std::fs::create_dir_all(&sub).unwrap();
-        // No devy.yml, no .git → walks up until hitting HOME or root → returns None.
-        // (On most systems this terminates when it hits an existing git root higher up
-        // or HOME; either way the specific devy.yml in this tree doesn't exist.)
-        let found = with_cwd(&sub, EnvyConfig::find_config);
-        // We can't assert None here unconditionally since there might be an devy.yml
-        // higher in the real tree; just verify it doesn't find one IN our temp root.
-        if let Some(ref p) = found {
-            assert!(
-                !p.starts_with(&root),
-                "find_config must not return a path inside our tempdir that has no devy.yml"
-            );
+
+        // Temporarily override HOME. Serialise via ENV_LOCK so this test doesn't
+        // race with other tests that read $HOME (e.g. rustup_bin(), rbenv_root()).
+        let _guard = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let orig_home = std::env::var("HOME").ok();
+        // SAFETY: serialised by ENV_LOCK; no other test mutates $HOME concurrently.
+        unsafe { std::env::set_var("HOME", root.to_str().unwrap()) };
+
+        let found = DevyConfig::find_config(&sub);
+
+        unsafe {
+            match orig_home {
+                Some(h) => std::env::set_var("HOME", h),
+                None => std::env::remove_var("HOME"),
+            }
         }
-        let _ = std::fs::remove_dir_all(&root);
+
+        assert!(
+            found.is_none(),
+            "find_config must return None when no .git and no devy.yml exist up to HOME"
+        );
+    }
+
+    #[test]
+    fn find_config_home_guard_fires_when_home_dir_missing() {
+        // HOME points to a path that does not exist on disk; the guard must still fire.
+        // Layout: fake_home/ (doesn't exist on disk), fake_home/inner/ (start).
+        // The walk goes: inner → fake_home. At fake_home the HOME guard must stop it
+        // before walking further. fake_home is set as HOME but never created on disk.
+        let root = tmp_dir();
+        let fake_home = root.join("nonexistent_home");
+        let sub = fake_home.join("inner");
+        // Only create `sub` (and its parents up to root); fake_home itself is NOT created.
+        std::fs::create_dir_all(&sub).unwrap();
+
+        let _guard = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let orig_home = std::env::var("HOME").ok();
+        unsafe { std::env::set_var("HOME", fake_home.to_str().unwrap()) };
+
+        // Walk: sub → fake_home. The HOME guard must fire at fake_home and return None.
+        // Without the fix the guard never fires (raw vs. canonical mismatch) and the
+        // walk continues up through root and eventually to `/`.
+        let found = DevyConfig::find_config(&sub);
+
+        unsafe {
+            match orig_home {
+                Some(h) => std::env::set_var("HOME", h),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+
+        assert!(
+            found.is_none(),
+            "find_config must stop at HOME even when HOME directory does not exist"
+        );
     }
 }

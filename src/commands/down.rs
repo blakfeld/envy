@@ -1,14 +1,14 @@
 use anyhow::{Context, Result};
 
 use crate::commands::exec::run_hook;
-use crate::config::EnvyConfig;
+use crate::config::DevyConfig;
 use crate::modules;
 use crate::output;
 use crate::package_manager::{self, PackageManager};
 
-#[mutants::skip] // thin I/O wrapper — requires a real devy.yml and package manager
+#[cfg_attr(test, mutants::skip)] // thin I/O wrapper — requires a real devy.yml and package manager
 pub fn run() -> Result<()> {
-    let config = EnvyConfig::load_default()?;
+    let config = DevyConfig::load_default()?;
 
     let project_name = config.name.as_deref().unwrap_or("project");
     output::header(&format!("devy down · {}", project_name));
@@ -30,8 +30,8 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn down_impl(config: &EnvyConfig, pm: &dyn PackageManager) -> Result<()> {
-    let deps = config.normalized_dependencies();
+pub(crate) fn down_impl(config: &DevyConfig, pm: &dyn PackageManager) -> Result<()> {
+    let deps = config.normalized_dependencies()?;
     let services: Vec<_> = deps
         .iter()
         .filter_map(|dep| {
@@ -45,6 +45,9 @@ pub(crate) fn down_impl(config: &EnvyConfig, pm: &dyn PackageManager) -> Result<
         return Ok(());
     }
 
+    // Services are stopped in declaration order (the order they appear in devy.yml).
+    // Modules that need to stop before a peer (e.g. Kafka before ZooKeeper) must
+    // handle that ordering themselves inside their stop() implementation.
     let mut stopped_any = false;
     for (dep, module) in services {
         if !module.is_running(pm, dep)? {
@@ -56,6 +59,7 @@ pub(crate) fn down_impl(config: &EnvyConfig, pm: &dyn PackageManager) -> Result<
         module
             .stop(pm, dep)
             .with_context(|| format!("Failed to stop {}", dep.name))?;
+        module.wait_for_stopped(pm, dep)?;
         output::success(&format!("{} stopped", dep.name));
         stopped_any = true;
     }
@@ -72,22 +76,12 @@ pub(crate) fn down_impl(config: &EnvyConfig, pm: &dyn PackageManager) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{EnvyConfig, RawDependency};
+    use crate::config::DevyConfig;
     use crate::package_manager::MockPackageManager;
     use std::collections::HashMap;
 
-    fn make_config(dep_names: &[&str]) -> EnvyConfig {
-        EnvyConfig {
-            name: Some("test".into()),
-            dependencies: dep_names
-                .iter()
-                .map(|n| RawDependency::Simple(n.to_string()))
-                .collect(),
-            environment: HashMap::new(),
-            commands: HashMap::new(),
-
-            hooks: Default::default(),
-        }
+    fn make_config(dep_names: &[&str]) -> DevyConfig {
+        crate::test_support::make_config(dep_names, HashMap::new())
     }
 
     #[test]

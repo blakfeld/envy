@@ -1,6 +1,6 @@
 /// Signals that the process should exit with the given code without printing an
 /// additional error message. Used by commands that already printed their own
-/// diagnostic output (e.g. `envy check`) and just need a non-zero exit code.
+/// diagnostic output (e.g. `devy check`) and just need a non-zero exit code.
 #[derive(Debug)]
 pub struct SilentExit(pub i32);
 

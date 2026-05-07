@@ -1,10 +1,11 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::collections::HashMap;
 
 use crate::config::Dependency;
+use crate::output;
 use crate::package_manager::PackageManager;
 
-use super::{Module, pm_dep};
+use super::{Module, pm_dep, tcp_ping};
 
 pub struct VaultModule;
 
@@ -16,11 +17,8 @@ fn package_name(pm: &dyn PackageManager) -> &'static str {
     }
 }
 
-fn port(dep: &Dependency) -> u16 {
-    dep.extra
-        .get("port")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(8200) as u16
+fn port(dep: &Dependency) -> anyhow::Result<u16> {
+    super::extra_port(dep, "port", 8200)
 }
 
 fn dev_mode(dep: &Dependency) -> bool {
@@ -33,6 +31,12 @@ fn dev_mode(dep: &Dependency) -> bool {
 impl Module for VaultModule {
     fn is_service(&self) -> bool {
         true
+    }
+    fn default_port(&self) -> Option<u16> {
+        Some(8200)
+    }
+    fn known_extra_keys(&self) -> Option<&'static [&'static str]> {
+        Some(&["port", "dev_mode"])
     }
 
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
@@ -56,26 +60,35 @@ impl Module for VaultModule {
     }
 
     fn health_check(&self, dep: &Dependency) -> Result<()> {
-        let p = port(dep);
-        let url = format!("http://127.0.0.1:{p}/v1/sys/health");
-        // Vault returns non-200 codes for standby/sealed states, all of which
-        // still indicate the process is up and responding.
-        match ureq::get(&url)
-            .timeout(std::time::Duration::from_secs(2))
-            .call()
-        {
-            Ok(_) => Ok(()),
-            Err(ureq::Error::Status(_, _)) => Ok(()),
-            Err(e) => Err(e).with_context(|| format!("Vault not reachable on port {p}")),
-        }
+        tcp_ping(port(dep)?, "Vault")
     }
 
-    fn env_vars(&self, dep: &Dependency) -> HashMap<String, String> {
-        let p = port(dep);
+    fn post_setup(
+        &self,
+        dep: &Dependency,
+        _pm: &dyn PackageManager,
+        _project_root: &std::path::Path,
+    ) -> Result<()> {
+        // Validate port eagerly so an invalid value is caught before env_vars is called.
+        // env_vars can't return Result, so it falls back to 8200 on error.
+        let _ = port(dep)?;
+        if dev_mode(dep) {
+            output::warn(
+                "Vault: VAULT_TOKEN=\"root\" (dev mode). Override via environment in devy.yml before deploying.",
+            );
+        }
+        Ok(())
+    }
+
+    fn env_vars(
+        &self,
+        dep: &Dependency,
+        _project_root: &std::path::Path,
+    ) -> HashMap<String, String> {
+        let p = port(dep).unwrap_or(8200);
         let mut vars = HashMap::new();
         vars.insert("VAULT_ADDR".into(), format!("http://127.0.0.1:{p}"));
         if dev_mode(dep) {
-            // Conventional root token for dev mode; users can override in devy.yml environment.
             vars.insert("VAULT_TOKEN".into(), "root".into());
         }
         vars
@@ -89,7 +102,10 @@ mod tests {
 
     fn dep_with_port(port: u64) -> Dependency {
         let mut extra = HashMap::new();
-        extra.insert("port".into(), serde_yaml::Value::Number(port.into()));
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(port.into()),
+        );
         Dependency::with_extra("vault", extra)
     }
 
@@ -101,13 +117,19 @@ mod tests {
     #[test]
     fn port_defaults_to_8200() {
         let dep = Dependency::simple("vault");
-        assert_eq!(port(&dep), 8200);
+        assert_eq!(port(&dep).unwrap(), 8200);
     }
 
     #[test]
     fn port_reads_custom_value() {
         let dep = dep_with_port(8201);
-        assert_eq!(port(&dep), 8201);
+        assert_eq!(port(&dep).unwrap(), 8201);
+    }
+
+    #[test]
+    fn port_bails_on_out_of_range() {
+        let dep = dep_with_port(99999);
+        assert!(port(&dep).is_err());
     }
 
     #[test]
@@ -126,7 +148,7 @@ mod tests {
     #[test]
     fn dev_mode_reads_true() {
         let mut extra = HashMap::new();
-        extra.insert("dev_mode".into(), serde_yaml::Value::Bool(true));
+        extra.insert("dev_mode".into(), crate::config::ExtraValue::Bool(true));
         let dep = Dependency::with_extra("vault", extra);
         assert!(dev_mode(&dep));
     }
@@ -134,7 +156,7 @@ mod tests {
     #[test]
     fn env_vars_always_includes_vault_addr() {
         let dep = Dependency::simple("vault");
-        let vars = VaultModule.env_vars(&dep);
+        let vars = VaultModule.env_vars(&dep, std::path::Path::new("/tmp"));
         assert_eq!(
             vars.get("VAULT_ADDR").map(|s| s.as_str()),
             Some("http://127.0.0.1:8200")
@@ -145,9 +167,9 @@ mod tests {
     #[test]
     fn env_vars_includes_vault_token_in_dev_mode() {
         let mut extra = HashMap::new();
-        extra.insert("dev_mode".into(), serde_yaml::Value::Bool(true));
+        extra.insert("dev_mode".into(), crate::config::ExtraValue::Bool(true));
         let dep = Dependency::with_extra("vault", extra);
-        let vars = VaultModule.env_vars(&dep);
+        let vars = VaultModule.env_vars(&dep, std::path::Path::new("/tmp"));
         assert_eq!(vars.get("VAULT_TOKEN").map(|s| s.as_str()), Some("root"));
     }
 
@@ -265,10 +287,48 @@ mod tests {
     #[test]
     fn env_vars_addr_uses_custom_port() {
         let dep = dep_with_port(8201);
-        let vars = VaultModule.env_vars(&dep);
+        let vars = VaultModule.env_vars(&dep, std::path::Path::new("/tmp"));
         assert_eq!(
             vars.get("VAULT_ADDR").map(|s| s.as_str()),
             Some("http://127.0.0.1:8201")
         );
+    }
+
+    #[test]
+    fn post_setup_warns_in_dev_mode() {
+        let mut extra = HashMap::new();
+        extra.insert("dev_mode".into(), crate::config::ExtraValue::Bool(true));
+        let dep = Dependency::with_extra("vault", extra);
+        let pm = crate::package_manager::MockPackageManager::default();
+        let count = crate::output::with_warn_capture(|| {
+            VaultModule
+                .post_setup(&dep, &pm, std::path::Path::new("/tmp"))
+                .unwrap();
+        });
+        assert_eq!(count, 1, "post_setup must warn when dev_mode is enabled");
+    }
+
+    #[test]
+    fn post_setup_returns_err_on_invalid_port() {
+        let dep = dep_with_port(99999);
+        let pm = crate::package_manager::MockPackageManager::default();
+        assert!(
+            VaultModule
+                .post_setup(&dep, &pm, std::path::Path::new("/tmp"))
+                .is_err(),
+            "post_setup must fail when port is out of range"
+        );
+    }
+
+    #[test]
+    fn post_setup_no_warn_without_dev_mode() {
+        let dep = Dependency::simple("vault");
+        let pm = crate::package_manager::MockPackageManager::default();
+        let count = crate::output::with_warn_capture(|| {
+            VaultModule
+                .post_setup(&dep, &pm, std::path::Path::new("/tmp"))
+                .unwrap();
+        });
+        assert_eq!(count, 0, "post_setup must not warn when dev_mode is off");
     }
 }

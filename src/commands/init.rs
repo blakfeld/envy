@@ -12,10 +12,6 @@ pub fn run(force: bool, config_path: &Path) -> Result<()> {
 name: my-project
 
 dependencies: []
-
-environment: {}
-
-commands: {}
 ";
 
     std::fs::write(config_path, content)?;

@@ -1,22 +1,22 @@
 use anyhow::{Context, Result, bail};
 use colored::Colorize;
 
-use crate::config::{Dependency, EnvyConfig};
+use crate::config::{Dependency, DevyConfig};
 use crate::modules;
 use crate::output;
 use crate::package_manager::{self, PackageManager};
 
 /// Print all services from devy.yml with their current running status.
-#[mutants::skip] // thin I/O wrapper — requires a real devy.yml and package manager
+#[cfg_attr(test, mutants::skip)] // thin I/O wrapper — requires a real devy.yml and package manager
 pub fn list() -> Result<()> {
-    let config = EnvyConfig::load_default()?;
+    let config = DevyConfig::load_default()?;
     let pm = package_manager::detect()?;
     list_impl(&config, pm.as_ref())
 }
 
-pub(crate) fn list_impl(config: &EnvyConfig, pm: &dyn PackageManager) -> Result<()> {
+pub(crate) fn list_impl(config: &DevyConfig, pm: &dyn PackageManager) -> Result<()> {
     let services: Vec<_> = config
-        .normalized_dependencies()
+        .normalized_dependencies()?
         .into_iter()
         .filter(|dep| modules::get(&dep.name).is_service())
         .collect();
@@ -26,10 +26,10 @@ pub(crate) fn list_impl(config: &EnvyConfig, pm: &dyn PackageManager) -> Result<
         return Ok(());
     }
 
-    output::header("services");
+    output::header("Services");
 
     for dep in &services {
-        let running = modules::get(&dep.name).is_running(pm, dep).unwrap_or(false);
+        let running = modules::get(&dep.name).is_running(pm, dep)?;
         if running {
             println!("  {}  {}", "●".green().bold(), dep.name);
         } else {
@@ -41,7 +41,7 @@ pub(crate) fn list_impl(config: &EnvyConfig, pm: &dyn PackageManager) -> Result<
     Ok(())
 }
 
-#[mutants::skip] // thin I/O wrapper — requires a real devy.yml and package manager
+#[cfg_attr(test, mutants::skip)] // thin I/O wrapper — requires a real devy.yml and package manager
 pub fn start(name: &str) -> Result<()> {
     let (dep, pm) = resolve(name)?;
     start_impl(&dep, pm.as_ref())
@@ -62,7 +62,7 @@ pub(crate) fn start_impl(dep: &Dependency, pm: &dyn PackageManager) -> Result<()
     Ok(())
 }
 
-#[mutants::skip] // thin I/O wrapper — requires a real devy.yml and package manager
+#[cfg_attr(test, mutants::skip)] // thin I/O wrapper — requires a real devy.yml and package manager
 pub fn stop(name: &str) -> Result<()> {
     let (dep, pm) = resolve(name)?;
     stop_impl(&dep, pm.as_ref())
@@ -78,11 +78,12 @@ pub(crate) fn stop_impl(dep: &Dependency, pm: &dyn PackageManager) -> Result<()>
 
     output::step(&format!("Stopping {}…", dep.name));
     module.stop(pm, dep)?;
+    module.wait_for_stopped(pm, dep)?;
     output::success(&format!("{} stopped", dep.name));
     Ok(())
 }
 
-#[mutants::skip] // thin I/O wrapper — requires a real devy.yml and package manager
+#[cfg_attr(test, mutants::skip)] // thin I/O wrapper — requires a real devy.yml and package manager
 pub fn restart(name: &str) -> Result<()> {
     let (dep, pm) = resolve(name)?;
     restart_impl(&dep, pm.as_ref())
@@ -94,6 +95,7 @@ pub(crate) fn restart_impl(dep: &Dependency, pm: &dyn PackageManager) -> Result<
     if module.is_running(pm, dep)? {
         output::step(&format!("Stopping {}…", dep.name));
         module.stop(pm, dep)?;
+        module.wait_for_stopped(pm, dep)?;
         output::success(&format!("{} stopped", dep.name));
     } else {
         output::skip(&format!("{} was already stopped", dep.name));
@@ -107,11 +109,14 @@ pub(crate) fn restart_impl(dep: &Dependency, pm: &dyn PackageManager) -> Result<
 }
 
 /// Finds the named dependency in config and verifies it is a service.
-pub(crate) fn resolve_dep(config: &EnvyConfig, name: &str) -> Result<Dependency> {
+/// Accepts both the exact name as written in devy.yml and any registered alias
+/// (e.g. "postgres" matches a dep named "postgresql" and vice-versa).
+pub(crate) fn resolve_dep(config: &DevyConfig, name: &str) -> Result<Dependency> {
+    let canonical_target = modules::canonical_name(name);
     let dep = config
-        .normalized_dependencies()
+        .normalized_dependencies()?
         .into_iter()
-        .find(|d| d.name == name)
+        .find(|d| d.name == name || modules::canonical_name(&d.name) == canonical_target)
         .ok_or_else(|| anyhow::anyhow!("'{}' not found in devy.yml dependencies", name))?;
 
     if !modules::get(&dep.name).is_service() {
@@ -122,7 +127,7 @@ pub(crate) fn resolve_dep(config: &EnvyConfig, name: &str) -> Result<Dependency>
 }
 
 fn resolve(name: &str) -> Result<(Dependency, Box<dyn PackageManager>)> {
-    let config = EnvyConfig::load_default()?;
+    let config = DevyConfig::load_default()?;
     let pm = package_manager::detect()?;
     pm.ensure_available()
         .with_context(|| format!("Failed to bootstrap {}", pm.name()))?;
@@ -133,22 +138,12 @@ fn resolve(name: &str) -> Result<(Dependency, Box<dyn PackageManager>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{EnvyConfig, RawDependency};
+    use crate::config::DevyConfig;
     use crate::package_manager::MockPackageManager;
     use std::collections::HashMap;
 
-    fn make_config(dep_names: &[&str]) -> EnvyConfig {
-        EnvyConfig {
-            name: Some("test".into()),
-            dependencies: dep_names
-                .iter()
-                .map(|n| RawDependency::Simple(n.to_string()))
-                .collect(),
-            environment: HashMap::new(),
-            commands: HashMap::new(),
-
-            hooks: Default::default(),
-        }
+    fn make_config(dep_names: &[&str]) -> DevyConfig {
+        crate::test_support::make_config(dep_names, HashMap::new())
     }
 
     // ── resolve_dep ───────────────────────────────────────────────────────────
@@ -189,6 +184,28 @@ mod tests {
         assert!(
             resolve_dep(&config, "mysql").is_ok(),
             "service dep must be accepted"
+        );
+    }
+
+    #[test]
+    fn resolve_dep_accepts_alias_for_service() {
+        // Config has "postgresql" (canonical), queried with alias "postgres".
+        let config = make_config(&["postgresql"]);
+        let dep = resolve_dep(&config, "postgres").unwrap();
+        assert_eq!(
+            dep.name, "postgresql",
+            "must return the dep as written in devy.yml"
+        );
+    }
+
+    #[test]
+    fn resolve_dep_accepts_canonical_name_for_aliased_dep() {
+        // Config has "postgres" (alias), queried with canonical "postgresql".
+        let config = make_config(&["postgres"]);
+        let dep = resolve_dep(&config, "postgresql").unwrap();
+        assert_eq!(
+            dep.name, "postgres",
+            "must return the dep as written in devy.yml"
         );
     }
 
@@ -304,5 +321,19 @@ mod tests {
             ..Default::default()
         };
         assert!(list_impl(&config, &pm).is_ok());
+    }
+
+    #[test]
+    fn list_impl_returns_err_when_is_running_fails() {
+        let config = make_config(&["mysql"]);
+        let pm = MockPackageManager {
+            installed: true,
+            is_running_fails: true,
+            ..Default::default()
+        };
+        assert!(
+            list_impl(&config, &pm).is_err(),
+            "list_impl must propagate is_running errors"
+        );
     }
 }

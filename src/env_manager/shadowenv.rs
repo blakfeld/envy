@@ -5,21 +5,15 @@ use std::path::Path;
 use std::process::Command;
 use which::which;
 
-pub const ENV_FILE: &str = ".shadowenv.d/500_devy.lisp";
-
 use super::EnvManager;
 
+pub const ENV_FILE: &str = ".shadowenv.d/500_devy.lisp";
+const ENV_FILENAME: &str = "500_devy.lisp";
+
+#[derive(Default)]
 pub struct Shadowenv;
 
 impl Shadowenv {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn is_available(&self) -> bool {
-        which("shadowenv").is_ok()
-    }
-
     fn write_env_file(
         &self,
         dir: &Path,
@@ -29,7 +23,13 @@ impl Shadowenv {
         let shadowenv_dir = dir.join(".shadowenv.d");
         fs::create_dir_all(&shadowenv_dir).context("Failed to create .shadowenv.d")?;
 
-        let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+        let esc = |s: &str| {
+            s.replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r")
+                .replace('\0', "")
+        };
         let mut content = String::from("(provide \"devy\" \"1.0.0\")\n\n");
 
         // PATH prepends: emit in reverse so the first entry ends up leftmost in PATH.
@@ -43,13 +43,15 @@ impl Shadowenv {
             content.push('\n');
         }
 
-        for (key, value) in vars {
+        let mut sorted_vars: Vec<(&String, &String)> = vars.iter().collect();
+        sorted_vars.sort_by_key(|(k, _)| k.as_str());
+        for (key, value) in sorted_vars {
             // Both key and value are escaped: unescaped quotes or backslashes would
             // corrupt the Lisp expression; an unescaped key could inject directives.
             content.push_str(&format!("(env/set \"{}\" \"{}\")\n", esc(key), esc(value)));
         }
 
-        fs::write(shadowenv_dir.join("500_devy.lisp"), content)
+        fs::write(shadowenv_dir.join(ENV_FILENAME), content)
             .context("Failed to write shadowenv environment file")?;
 
         Ok(())
@@ -68,27 +70,96 @@ impl Shadowenv {
     }
 }
 
+fn unescape(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('"') => result.push('"'),
+                Some('\\') => result.push('\\'),
+                Some('n') => result.push('\n'),
+                Some('r') => result.push('\r'),
+                Some(other) => {
+                    result.push('\\');
+                    result.push(other);
+                }
+                None => result.push('\\'),
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+/// Walks `s` byte-by-byte respecting `\"` escapes, returning the content before
+/// the first unescaped `"` and the remainder after it.
+fn scan_quoted(s: &str) -> Option<(&str, &str)> {
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'\\' {
+            i += 2; // skip escaped character
+            continue;
+        }
+        if b[i] == b'"' {
+            return Some((&s[..i], &s[i + 1..]));
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Parses a single `(env/set "KEY" "VALUE")` line, respecting escaped quotes in
+/// both key and value. Returns `None` if the line doesn't match the format.
+fn parse_env_set_line(line: &str) -> Option<(String, String)> {
+    let rest = line.strip_prefix("(env/set \"")?;
+    let (raw_key, rest) = scan_quoted(rest)?;
+    let rest = rest.strip_prefix(" \"")?;
+    let (raw_value, rest) = scan_quoted(rest)?;
+    rest.strip_prefix(")")?;
+    Some((unescape(raw_key), unescape(raw_value)))
+}
+
 /// Parses `(env/set "KEY" "VALUE")` lines from the shadowenv lisp file.
 /// Returns `None` if the file does not exist yet.
 pub fn read_vars(path: &Path) -> Option<HashMap<String, String>> {
     let content = std::fs::read_to_string(path).ok()?;
     let mut vars = HashMap::new();
     for line in content.lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix("(env/set \"")
-            && let Some((key, rest)) = rest.split_once("\" \"")
-            && let Some(value) = rest.strip_suffix("\")")
-        {
-            let unescape = |s: &str| s.replace("\\\"", "\"").replace("\\\\", "\\");
-            vars.insert(unescape(key), unescape(value));
+        if let Some((key, value)) = parse_env_set_line(line.trim()) {
+            vars.insert(key, value);
         }
     }
     Some(vars)
 }
 
+/// Parses `(env/prepend-to-pathlist "PATH" "ENTRY")` lines from the shadowenv lisp file.
+/// Returns `None` if the file does not exist yet.
+pub fn read_path_prepends(path: &Path) -> Option<Vec<String>> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let mut entries = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("(env/prepend-to-pathlist \"PATH\" \"")
+            && let Some(entry) = rest.strip_suffix("\")")
+        {
+            entries.push(unescape(entry));
+        }
+    }
+    // Reverse: they were written in reverse-prepend order; restore original order.
+    entries.reverse();
+    Some(entries)
+}
+
 impl EnvManager for Shadowenv {
     fn name(&self) -> &str {
         "shadowenv"
+    }
+
+    fn is_available(&self) -> bool {
+        which("shadowenv").is_ok()
     }
 
     fn setup(
@@ -101,22 +172,22 @@ impl EnvManager for Shadowenv {
         self.trust(dir)?;
         Ok(())
     }
+
+    fn read_vars(&self, project_root: &Path) -> Option<HashMap<String, String>> {
+        read_vars(&project_root.join(ENV_FILE))
+    }
+
+    fn read_path_prepends(&self, project_root: &Path) -> Option<Vec<String>> {
+        read_path_prepends(&project_root.join(ENV_FILE))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn tmp_dir() -> std::path::PathBuf {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static N: AtomicU64 = AtomicU64::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "devy_shadow_{}_{}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+    fn tmp_dir() -> crate::test_support::TempDir {
+        crate::test_support::tmp_dir()
     }
 
     // ── read_vars ─────────────────────────────────────────────────────────────
@@ -140,8 +211,6 @@ mod tests {
         assert_eq!(vars.len(), 2);
         assert_eq!(vars["FOO"], "bar");
         assert_eq!(vars["BAZ"], "qux");
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -157,8 +226,12 @@ mod tests {
         let vars = read_vars(&file).unwrap();
         assert_eq!(vars.len(), 1);
         assert_eq!(vars["KEY"], "value");
+    }
 
-        let _ = std::fs::remove_dir_all(&dir);
+    #[test]
+    fn unescape_double_backslash_produces_single() {
+        // "a\\\\b" in source (4 chars: a, \, \, b) → unescape → "a\\b" (3 chars: a, \, b)
+        assert_eq!(unescape(r"a\\b"), r"a\b");
     }
 
     #[test]
@@ -170,8 +243,6 @@ mod tests {
 
         let vars = read_vars(&file).unwrap();
         assert_eq!(vars["KEY"], "a\\b\"c");
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -182,8 +253,6 @@ mod tests {
 
         let vars = read_vars(&file).unwrap();
         assert!(vars.is_empty());
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // ── write_env_file ────────────────────────────────────────────────────────
@@ -191,7 +260,7 @@ mod tests {
     #[test]
     fn write_env_file_creates_directory_and_file() {
         let dir = tmp_dir();
-        let shadowenv = Shadowenv::new();
+        let shadowenv = Shadowenv::default();
         let mut vars = HashMap::new();
         vars.insert("MY_VAR".into(), "hello".into());
 
@@ -203,14 +272,12 @@ mod tests {
         assert!(content.contains("(provide \"devy\""));
         assert!(content.contains("MY_VAR"));
         assert!(content.contains("hello"));
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn write_env_file_escapes_special_chars_in_value() {
         let dir = tmp_dir();
-        let shadowenv = Shadowenv::new();
+        let shadowenv = Shadowenv::default();
         let mut vars = HashMap::new();
         vars.insert("K".into(), "back\\slash and \"quote\"".into());
 
@@ -219,14 +286,57 @@ mod tests {
         let file = dir.join(".shadowenv.d").join("500_devy.lisp");
         let parsed = read_vars(&file).unwrap();
         assert_eq!(parsed["K"], "back\\slash and \"quote\"");
+    }
 
-        let _ = std::fs::remove_dir_all(&dir);
+    #[test]
+    fn write_env_file_escapes_newline_in_value() {
+        let dir = tmp_dir();
+        let shadowenv = Shadowenv::default();
+        let mut vars = HashMap::new();
+        vars.insert("K".into(), "line1\nline2".into());
+        shadowenv.write_env_file(&dir, &vars, &[]).unwrap();
+        let file = dir.join(".shadowenv.d").join("500_devy.lisp");
+        let raw = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            !raw.contains("line1\nline2"),
+            "raw newline must not appear in file"
+        );
+        let parsed = read_vars(&file).unwrap();
+        assert_eq!(parsed["K"], "line1\nline2");
+    }
+
+    #[test]
+    fn read_vars_round_trips_value_with_embedded_quote_space_quote() {
+        // Value contains `" "` (quote-space-quote) which previously caused a wrong split.
+        let dir = tmp_dir();
+        let shadowenv = Shadowenv::default();
+        let mut vars = HashMap::new();
+        vars.insert("K".into(), "a\" \"b".into());
+        shadowenv.write_env_file(&dir, &vars, &[]).unwrap();
+        let file = dir.join(".shadowenv.d").join("500_devy.lisp");
+        let parsed = read_vars(&file).unwrap();
+        assert_eq!(
+            parsed["K"], "a\" \"b",
+            "value containing '\" \"' must round-trip correctly"
+        );
+    }
+
+    #[test]
+    fn write_env_file_escapes_carriage_return_in_value() {
+        let dir = tmp_dir();
+        let shadowenv = Shadowenv::default();
+        let mut vars = HashMap::new();
+        vars.insert("K".into(), "a\rb".into());
+        shadowenv.write_env_file(&dir, &vars, &[]).unwrap();
+        let file = dir.join(".shadowenv.d").join("500_devy.lisp");
+        let parsed = read_vars(&file).unwrap();
+        assert_eq!(parsed["K"], "a\rb");
     }
 
     #[test]
     fn write_env_file_escapes_special_chars_in_key() {
         let dir = tmp_dir();
-        let shadowenv = Shadowenv::new();
+        let shadowenv = Shadowenv::default();
         let mut vars = HashMap::new();
         // A key with a quote would be a Lisp injection if not escaped.
         vars.insert("KEY_WITH_\"QUOTE\"".into(), "value".into());
@@ -237,15 +347,13 @@ mod tests {
         let parsed = read_vars(&file).unwrap();
         // Should round-trip correctly rather than breaking the Lisp structure.
         assert_eq!(parsed["KEY_WITH_\"QUOTE\""], "value");
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // ── Shadowenv::name ───────────────────────────────────────────────────────
 
     #[test]
     fn shadowenv_name_is_shadowenv() {
-        assert_eq!(Shadowenv::new().name(), "shadowenv");
+        assert_eq!(Shadowenv::default().name(), "shadowenv");
     }
 
     // ── Shadowenv::is_available ───────────────────────────────────────────────
@@ -253,7 +361,7 @@ mod tests {
     #[test]
     fn shadowenv_is_available_consistent_with_which() {
         let expected = which("shadowenv").is_ok();
-        assert_eq!(Shadowenv::new().is_available(), expected);
+        assert_eq!(Shadowenv::default().is_available(), expected);
     }
 
     #[test]
@@ -262,7 +370,7 @@ mod tests {
             return;
         }
         assert!(
-            Shadowenv::new().is_available(),
+            Shadowenv::default().is_available(),
             "must be true when shadowenv is on PATH"
         );
     }
@@ -273,7 +381,7 @@ mod tests {
             return;
         }
         assert!(
-            !Shadowenv::new().is_available(),
+            !Shadowenv::default().is_available(),
             "must be false when shadowenv is absent"
         );
     }
@@ -283,7 +391,7 @@ mod tests {
     #[test]
     fn shadowenv_setup_writes_env_file() {
         let dir = tmp_dir();
-        let shadowenv = Shadowenv::new();
+        let shadowenv = Shadowenv::default();
         let mut vars = HashMap::new();
         vars.insert("SETUP_KEY".into(), "setup_val".into());
         shadowenv.write_env_file(&dir, &vars, &[]).unwrap();
@@ -291,7 +399,6 @@ mod tests {
         assert!(file.exists(), "setup must create the lisp file");
         let content = std::fs::read_to_string(&file).unwrap();
         assert!(content.contains("SETUP_KEY"));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -302,7 +409,7 @@ mod tests {
             return;
         }
         let dir = tmp_dir();
-        let shadowenv = Shadowenv::new();
+        let shadowenv = Shadowenv::default();
         let mut vars = HashMap::new();
         vars.insert("KEY".into(), "val".into());
         let result = shadowenv.setup(&dir, &vars, &[]);
@@ -310,7 +417,6 @@ mod tests {
             result.is_err(),
             "setup must fail when shadowenv binary is absent"
         );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -321,7 +427,7 @@ mod tests {
             return;
         }
         let dir = tmp_dir();
-        let shadowenv = Shadowenv::new();
+        let shadowenv = Shadowenv::default();
         let mut vars = HashMap::new();
         vars.insert("KEY".into(), "val".into());
         let result = shadowenv.setup(&dir, &vars, &[]);
@@ -329,6 +435,5 @@ mod tests {
             result.is_ok(),
             "setup must succeed when shadowenv is installed"
         );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

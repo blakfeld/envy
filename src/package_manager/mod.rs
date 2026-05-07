@@ -36,6 +36,12 @@ pub trait PackageManager {
         None
     }
 
+    /// Validates dependency configuration before install (e.g. tap allowlist).
+    /// Called by `devy check` so issues surface without triggering any installs.
+    fn validate_config(&self, _dep: &Dependency) -> Result<()> {
+        Ok(())
+    }
+
     fn ensure_available(&self) -> Result<()> {
         if !self.is_available() {
             self.bootstrap()
@@ -47,31 +53,13 @@ pub trait PackageManager {
 
 pub fn detect() -> Result<Box<dyn PackageManager>> {
     #[cfg(target_os = "macos")]
-    return Ok(Box::new(Homebrew::new()));
+    return Ok(Box::new(Homebrew));
 
     #[cfg(target_os = "linux")]
-    {
-        let apt = Apt::new();
-        if apt.is_available() {
-            return Ok(Box::new(apt));
-        }
-        anyhow::bail!(
-            "No supported package manager found. \
-             Only apt-based systems (Ubuntu/Debian) are currently supported on Linux."
-        );
-    }
+    return Ok(Box::new(Apt::new()));
 
     #[cfg(target_os = "windows")]
-    {
-        let wg = WinGet::new();
-        if wg.is_available() {
-            return Ok(Box::new(wg));
-        }
-        anyhow::bail!(
-            "winget not found. Install App Installer from the Microsoft Store \
-             or update to a recent version of Windows 10/11."
-        );
-    }
+    return Ok(Box::new(WinGet::new()));
 
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     anyhow::bail!("No supported package manager for this operating system")
@@ -87,6 +75,7 @@ pub struct MockPackageManager {
     pub install_fails: bool,
     pub start_service_fails: bool,
     pub stop_service_fails: bool,
+    pub is_running_fails: bool,
     pub config_dir: Option<std::path::PathBuf>,
     /// When set, `is_package_installed` returns true only when `dep.name == installed_pkg`.
     pub installed_pkg: Option<&'static str>,
@@ -98,6 +87,8 @@ pub struct MockPackageManager {
     pub installed_packages: std::cell::RefCell<Vec<String>>,
     /// When set, `resolved_version` returns this value instead of Ok(None).
     pub version: Option<String>,
+    /// When true, `validate_config` returns an error.
+    pub validate_config_fails: bool,
 }
 
 #[cfg(test)]
@@ -110,12 +101,14 @@ impl Default for MockPackageManager {
             install_fails: false,
             start_service_fails: false,
             stop_service_fails: false,
+            is_running_fails: false,
             config_dir: None,
             installed_pkg: None,
             started_services: std::cell::RefCell::new(Vec::new()),
             stopped_services: std::cell::RefCell::new(Vec::new()),
             installed_packages: std::cell::RefCell::new(Vec::new()),
             version: None,
+            validate_config_fails: false,
         }
     }
 }
@@ -146,7 +139,14 @@ impl PackageManager for MockPackageManager {
             Ok(())
         }
     }
-    fn is_service_running(&self, _: &str) -> Result<bool> {
+    fn is_service_running(&self, name: &str) -> Result<bool> {
+        if self.is_running_fails {
+            anyhow::bail!("mock is_service_running failure")
+        }
+        // Return false if this service was already stopped (simulates real stop behaviour).
+        if self.stopped_services.borrow().contains(&name.to_string()) {
+            return Ok(false);
+        }
         Ok(self.service_running)
     }
     fn start_service(&self, name: &str) -> Result<()> {
@@ -170,6 +170,13 @@ impl PackageManager for MockPackageManager {
     }
     fn service_config_dir(&self, _: &str) -> Option<std::path::PathBuf> {
         self.config_dir.clone()
+    }
+    fn validate_config(&self, _dep: &Dependency) -> Result<()> {
+        if self.validate_config_fails {
+            anyhow::bail!("mock validate_config failure")
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -248,6 +255,14 @@ mod tests {
         fn resolved_version(&self, _: &Dependency) -> Result<Option<String>> {
             Ok(None)
         }
+    }
+
+    #[test]
+    fn detect_returns_ok_on_current_platform() {
+        assert!(
+            detect().is_ok(),
+            "detect() must return Ok on the current platform"
+        );
     }
 
     #[test]

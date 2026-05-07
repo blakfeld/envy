@@ -17,8 +17,8 @@ fn bun_bin() -> Option<String> {
 }
 
 impl Module for BunModule {
-    fn source(&self) -> &'static str {
-        "bun-installer"
+    fn source(&self) -> Option<&'static str> {
+        Some("bun-installer")
     }
 
     fn is_installed(&self, _pm: &dyn PackageManager, _dep: &Dependency) -> Result<bool> {
@@ -87,7 +87,7 @@ mod tests {
 
     #[test]
     fn bun_source_is_bun_installer() {
-        assert_eq!(BunModule.source(), "bun-installer");
+        assert_eq!(BunModule.source(), Some("bun-installer"));
     }
 
     #[test]
@@ -211,7 +211,10 @@ mod tests {
     #[test]
     fn bun_install_fails_when_script_exits_nonzero() {
         // Uses ENVY_TEST_BUN_INSTALL_SCRIPT to inject a failing script.
-        // Only this test sets this variable; no other bun test reads it.
+        let _guard = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // SAFETY: serialised by ENV_LOCK; var is only read by BunModule::install.
         unsafe {
             std::env::set_var("ENVY_TEST_BUN_INSTALL_SCRIPT", "exit 1");
         }

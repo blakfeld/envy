@@ -8,10 +8,70 @@ use std::path::Path;
 
 pub trait EnvManager {
     fn name(&self) -> &str;
+    fn is_available(&self) -> bool;
     fn setup(
         &self,
         dir: &Path,
         vars: &HashMap<String, String>,
         path_prepends: &[String],
     ) -> Result<()>;
+    /// Reads back the variables previously written by `setup`. Returns `None` if the
+    /// env file has not been created yet.
+    fn read_vars(&self, project_root: &Path) -> Option<HashMap<String, String>>;
+    /// Reads back PATH prepend entries previously written by `setup`. Returns `None` if the
+    /// env file has not been created yet.
+    fn read_path_prepends(&self, project_root: &Path) -> Option<Vec<String>>;
+}
+
+#[cfg(test)]
+pub struct MockEnvManager {
+    pub is_available: bool,
+    pub setup_fails: bool,
+    pub setup_called: std::cell::Cell<bool>,
+    pub read_vars_returns_some: bool,
+}
+
+#[cfg(test)]
+impl Default for MockEnvManager {
+    fn default() -> Self {
+        Self {
+            is_available: true,
+            setup_fails: false,
+            setup_called: std::cell::Cell::new(false),
+            read_vars_returns_some: false,
+        }
+    }
+}
+
+#[cfg(test)]
+impl EnvManager for MockEnvManager {
+    fn name(&self) -> &str {
+        "mock-env"
+    }
+    fn is_available(&self) -> bool {
+        self.is_available
+    }
+    fn setup(
+        &self,
+        _dir: &Path,
+        _vars: &HashMap<String, String>,
+        _path_prepends: &[String],
+    ) -> Result<()> {
+        self.setup_called.set(true);
+        if self.setup_fails {
+            anyhow::bail!("mock env setup failure")
+        } else {
+            Ok(())
+        }
+    }
+    fn read_vars(&self, _project_root: &Path) -> Option<HashMap<String, String>> {
+        if self.read_vars_returns_some {
+            Some(HashMap::new())
+        } else {
+            None
+        }
+    }
+    fn read_path_prepends(&self, _project_root: &Path) -> Option<Vec<String>> {
+        None
+    }
 }

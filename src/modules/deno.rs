@@ -17,8 +17,8 @@ fn deno_bin() -> Option<String> {
 }
 
 impl Module for DenoModule {
-    fn source(&self) -> &'static str {
-        "deno-installer"
+    fn source(&self) -> Option<&'static str> {
+        Some("deno-installer")
     }
 
     fn is_installed(&self, _pm: &dyn PackageManager, _dep: &Dependency) -> Result<bool> {
@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn deno_source_is_deno_installer() {
-        assert_eq!(DenoModule.source(), "deno-installer");
+        assert_eq!(DenoModule.source(), Some("deno-installer"));
     }
 
     #[test]
@@ -219,6 +219,10 @@ mod tests {
     #[test]
     fn deno_install_fails_when_script_exits_nonzero() {
         // Uses ENVY_TEST_DENO_INSTALL_SCRIPT to inject a failing script.
+        let _guard = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // SAFETY: serialised by ENV_LOCK; var is only read by DenoModule::install.
         unsafe {
             std::env::set_var("ENVY_TEST_DENO_INSTALL_SCRIPT", "exit 1");
         }
