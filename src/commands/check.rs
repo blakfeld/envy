@@ -50,6 +50,12 @@ pub(crate) fn check_impl(
             for warning in module.config_warnings(dep) {
                 output::warn(&format!("{}: {}", dep.name, warning));
             }
+            if let Some(shell) = dep.shell.as_deref()
+                && let Err(e) = crate::commands::exec::validate_shell(shell)
+            {
+                issues += 1;
+                output::warn(&format!("{}: invalid shell '{}': {}", dep.name, shell, e));
+            }
         }
         output::header("Dependencies");
         issues += shared::print_dep_table(&deps, pm, true)?;
@@ -282,6 +288,36 @@ mod tests {
         assert!(
             warn_count > 0,
             "check_impl must emit config_warnings for minio with credentials"
+        );
+    }
+
+    #[test]
+    fn check_impl_returns_err_on_invalid_shell() {
+        use crate::config::{DepConfig, RawDependency};
+        use std::collections::HashMap as HM;
+        let mut map = HM::new();
+        map.insert(
+            "node".to_string(),
+            Some(DepConfig {
+                shell: Some("not-a-shell".to_string()),
+                ..Default::default()
+            }),
+        );
+        let config = DevyConfig {
+            name: None,
+            dependencies: vec![RawDependency::Configured(map)],
+            environment: HashMap::new(),
+            commands: HashMap::new(),
+            hooks: Default::default(),
+        };
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        let result = check_impl(&config, &pm, &MockEnvManager::default(), Path::new("."));
+        assert!(
+            result.is_err(),
+            "check_impl must return Err when dep.shell is not in the allowed list"
         );
     }
 }

@@ -42,10 +42,10 @@ impl LockFile {
             Err(e) => return Err(e).context("Failed to read devy.lock"),
         };
         let lock: Self = serde_yml::from_str(&content).context("Failed to parse devy.lock")?;
-        if lock.version > 1 {
+        if lock.version != 1 {
             anyhow::bail!(
-                "devy.lock was written by a newer version of devy (format version {}). \
-                 Update devy to read this file.",
+                "devy.lock has unsupported format version {}. \
+                 Only version 1 is supported.",
                 lock.version
             );
         }
@@ -255,6 +255,26 @@ mod tests {
         );
         assert!(
             result.unwrap_err().to_string().contains("99"),
+            "error must mention the unsupported version number"
+        );
+    }
+
+    #[test]
+    fn load_rejects_version_zero() {
+        let dir = tmp_dir();
+        let path = lock_path(&dir);
+        std::fs::write(
+            &path,
+            "version: 0\ndependencies:\n  node:\n    resolved_version: '20.0.0'\n    source: homebrew\n",
+        )
+        .unwrap();
+        let result = LockFile::load(&path);
+        assert!(
+            result.is_err(),
+            "load must reject lock files with version 0"
+        );
+        assert!(
+            result.unwrap_err().to_string().contains("0"),
             "error must mention the unsupported version number"
         );
     }

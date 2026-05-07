@@ -15,7 +15,7 @@ fn shell_flag(shell: &str) -> &'static str {
     }
 }
 
-fn validate_shell(shell: &str) -> Result<()> {
+pub(crate) fn validate_shell(shell: &str) -> Result<()> {
     if shell.contains('/') || shell.contains('\\') {
         bail!(
             "shell '{}' must be a bare name, not a path; permitted shells: {}",

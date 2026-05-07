@@ -142,11 +142,16 @@ pub fn read_path_prepends(path: &Path) -> Option<Vec<String>> {
     let mut entries = Vec::new();
     for line in content.lines() {
         let line = line.trim();
-        if let Some(rest) = line.strip_prefix("(env/prepend-to-pathlist \"PATH\" \"")
-            && let Some(entry) = rest.strip_suffix("\")")
-        {
-            entries.push(unescape(entry));
+        let Some(rest) = line.strip_prefix("(env/prepend-to-pathlist \"PATH\" \"") else {
+            continue;
+        };
+        let Some((raw_entry, remainder)) = scan_quoted(rest) else {
+            continue;
+        };
+        if !remainder.starts_with(')') {
+            continue;
         }
+        entries.push(unescape(raw_entry));
     }
     // Reverse: they were written in reverse-prepend order; restore original order.
     entries.reverse();
@@ -434,6 +439,44 @@ mod tests {
         assert!(
             result.is_ok(),
             "setup must succeed when shadowenv is installed"
+        );
+    }
+
+    // ── read_path_prepends ────────────────────────────────────────────────────
+
+    #[test]
+    fn read_path_prepends_handles_escaped_quote_in_path() {
+        let dir = tmp_dir();
+        let shadowenv = Shadowenv::default();
+        let path_with_quote = "/home/user/\"project\"/bin".to_string();
+        shadowenv
+            .write_env_file(&dir, &HashMap::new(), &[path_with_quote.clone()])
+            .unwrap();
+        let file = dir.join(".shadowenv.d").join("500_devy.lisp");
+        let entries = read_path_prepends(&file).unwrap();
+        assert_eq!(
+            entries,
+            vec![path_with_quote],
+            "path containing '\"' must round-trip through write/read correctly"
+        );
+    }
+
+    #[test]
+    fn read_path_prepends_round_trips_multiple_entries() {
+        let dir = tmp_dir();
+        let shadowenv = Shadowenv::default();
+        let paths = vec![
+            "/usr/local/bin".to_string(),
+            "/home/user/.local/bin".to_string(),
+        ];
+        shadowenv
+            .write_env_file(&dir, &HashMap::new(), &paths)
+            .unwrap();
+        let file = dir.join(".shadowenv.d").join("500_devy.lisp");
+        let entries = read_path_prepends(&file).unwrap();
+        assert_eq!(
+            entries, paths,
+            "multiple path entries must round-trip in order"
         );
     }
 }

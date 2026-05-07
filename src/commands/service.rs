@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use colored::Colorize;
 
 use crate::config::{Dependency, DevyConfig};
@@ -57,7 +57,12 @@ pub(crate) fn start_impl(dep: &Dependency, pm: &dyn PackageManager) -> Result<()
 
     output::step(&format!("Starting {}…", dep.name));
     module.start(pm, dep)?;
-    module.wait_for_ready(dep)?;
+    if let Err(e) = module.wait_for_ready(dep) {
+        output::warn(&format!(
+            "{} started but health check timed out — verify manually: {}",
+            dep.name, e
+        ));
+    }
     output::success(&format!("{} started", dep.name));
     Ok(())
 }
@@ -103,7 +108,12 @@ pub(crate) fn restart_impl(dep: &Dependency, pm: &dyn PackageManager) -> Result<
 
     output::step(&format!("Starting {}…", dep.name));
     module.start(pm, dep)?;
-    module.wait_for_ready(dep)?;
+    if let Err(e) = module.wait_for_ready(dep) {
+        output::warn(&format!(
+            "{} started but health check timed out — verify manually: {}",
+            dep.name, e
+        ));
+    }
     output::success(&format!("{} started", dep.name));
     Ok(())
 }
@@ -129,8 +139,6 @@ pub(crate) fn resolve_dep(config: &DevyConfig, name: &str) -> Result<Dependency>
 fn resolve(name: &str) -> Result<(Dependency, Box<dyn PackageManager>)> {
     let config = DevyConfig::load_default()?;
     let pm = package_manager::detect()?;
-    pm.ensure_available()
-        .with_context(|| format!("Failed to bootstrap {}", pm.name()))?;
     let dep = resolve_dep(&config, name)?;
     Ok((dep, pm))
 }
@@ -284,6 +292,22 @@ mod tests {
         // Returns Ok without calling start_service.
         start_impl(&dep, &pm).unwrap();
         assert!(pm.started_services.borrow().is_empty());
+    }
+
+    #[test]
+    fn start_impl_returns_ok_when_start_succeeds() {
+        // Even though wait_for_ready will time out (no real service in tests),
+        // start_impl must return Ok — timeout is demoted to a warning.
+        let pm = MockPackageManager {
+            service_running: false,
+            start_service_fails: false,
+            ..Default::default()
+        };
+        let dep = Dependency::simple("mysql");
+        assert!(
+            start_impl(&dep, &pm).is_ok(),
+            "start_impl must return Ok when start succeeds, even if health check times out"
+        );
     }
 
     // ── restart_impl ──────────────────────────────────────────────────────────

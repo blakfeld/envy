@@ -31,19 +31,34 @@ fn parse_brew_version(line: &str) -> Option<String> {
     line.split_whitespace().nth(1).map(String::from)
 }
 
+/// Returns the Homebrew formula name for a dependency.
+///
+/// Homebrew supports `name@major` formula selectors (e.g. `node@20`). Lock-injected
+/// resolved versions contain a dot (e.g. "20.11.0") and are NOT valid formula names —
+/// those are informational and should not change the formula used for install/list queries.
+fn brew_formula_name(dep: &Dependency) -> String {
+    match &dep.version {
+        Some(v) if !v.contains('.') => format!("{}@{}", dep.name, v),
+        _ => dep.name.clone(),
+    }
+}
+
 impl Homebrew {
     fn brew_bin(&self) -> String {
+        // Prefer the brew on PATH so brew_bin() and is_available() always agree.
+        if let Ok(path) = which("brew") {
+            return path.to_string_lossy().into_owned();
+        }
         if let Ok(prefix) = std::env::var("HOMEBREW_PREFIX")
             && !prefix.is_empty()
         {
             return format!("{prefix}/bin/brew");
         }
-        let default = if cfg!(target_arch = "aarch64") {
-            "/opt/homebrew/bin/brew"
+        if cfg!(target_arch = "aarch64") {
+            "/opt/homebrew/bin/brew".to_string()
         } else {
-            "/usr/local/bin/brew"
-        };
-        default.to_string()
+            "/usr/local/bin/brew".to_string()
+        }
     }
 
     fn run(&self, args: &[&str]) -> Result<std::process::Output> {
@@ -121,7 +136,7 @@ impl PackageManager for Homebrew {
     }
 
     fn is_package_installed(&self, dep: &Dependency) -> Result<bool> {
-        let pkg = dep.versioned_name();
+        let pkg = brew_formula_name(dep);
         let output = self.run(&["list", "--versions", &pkg])?;
         Ok(output.status.success() && !String::from_utf8_lossy(&output.stdout).trim().is_empty())
     }
@@ -131,7 +146,7 @@ impl PackageManager for Homebrew {
             validate_tap(tap)?;
             self.run_interactive(&["tap", tap])?;
         }
-        self.run_interactive(&["install", &dep.versioned_name()])
+        self.run_interactive(&["install", &brew_formula_name(dep)])
     }
 
     fn is_service_running(&self, name: &str) -> Result<bool> {
@@ -151,7 +166,7 @@ impl PackageManager for Homebrew {
     }
 
     fn resolved_version(&self, dep: &Dependency) -> Result<Option<String>> {
-        let output = self.run(&["list", "--versions", &dep.versioned_name()])?;
+        let output = self.run(&["list", "--versions", &brew_formula_name(dep)])?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let line = stdout.trim();
         // Output: "formula 1.2.3" or "formula@major 1.2.3_4" — take second token.
@@ -241,7 +256,39 @@ mod tests {
     }
 
     #[test]
-    fn brew_bin_uses_homebrew_prefix_env_var() {
+    fn brew_bin_prefers_which_when_prefix_set() {
+        // which("brew") takes priority over HOMEBREW_PREFIX — the two must always agree.
+        let _guard = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let Ok(which_path) = which("brew") else {
+            // brew not on PATH; this behaviour is untestable without PATH manipulation
+            return;
+        };
+        let prev = std::env::var("HOMEBREW_PREFIX").ok();
+        // SAFETY: serialised by ENV_LOCK; HOMEBREW_PREFIX is only read by brew_bin().
+        unsafe { std::env::set_var("HOMEBREW_PREFIX", "/bogus/homebrew") };
+        let result = Homebrew::default().brew_bin();
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("HOMEBREW_PREFIX", v),
+                None => std::env::remove_var("HOMEBREW_PREFIX"),
+            }
+        }
+        assert_eq!(
+            result,
+            which_path.to_string_lossy(),
+            "brew_bin must return the PATH-resolved brew, not the HOMEBREW_PREFIX path"
+        );
+    }
+
+    #[test]
+    fn brew_bin_uses_homebrew_prefix_when_brew_not_on_path() {
+        // HOMEBREW_PREFIX is used only when brew is absent from PATH.
+        // Skip when brew is installed since we cannot safely manipulate PATH in tests.
+        if which("brew").is_ok() {
+            return;
+        }
         let _guard = crate::test_support::ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -350,6 +397,36 @@ mod tests {
             msg.contains("DEVY_NO_BOOTSTRAP"),
             "error must mention DEVY_NO_BOOTSTRAP, got: {msg}"
         );
+    }
+
+    // ── brew_formula_name ─────────────────────────────────────────────────────
+
+    #[test]
+    fn brew_formula_name_with_no_version_returns_base_name() {
+        let dep = Dependency::simple("redis");
+        assert_eq!(brew_formula_name(&dep), "redis");
+    }
+
+    #[test]
+    fn brew_formula_name_with_major_pin_appends_version() {
+        let mut dep = Dependency::simple("node");
+        dep.version = Some("20".into());
+        assert_eq!(brew_formula_name(&dep), "node@20");
+    }
+
+    #[test]
+    fn brew_formula_name_with_resolved_version_returns_base_name() {
+        // Lock-injected versions like "7.2.4" contain dots — must NOT become "redis@7.2.4".
+        let mut dep = Dependency::simple("redis");
+        dep.version = Some("7.2.4".into());
+        assert_eq!(brew_formula_name(&dep), "redis");
+    }
+
+    #[test]
+    fn brew_formula_name_with_full_node_lock_version_returns_base_name() {
+        let mut dep = Dependency::simple("node");
+        dep.version = Some("20.11.0".into());
+        assert_eq!(brew_formula_name(&dep), "node");
     }
 
     // ── parse_brew_version ────────────────────────────────────────────────────

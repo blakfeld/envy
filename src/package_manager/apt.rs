@@ -94,23 +94,18 @@ impl PackageManager for Apt {
 
     fn is_package_installed(&self, dep: &Dependency) -> Result<bool> {
         let output = Command::new("dpkg-query")
-            .args(["-W", "-f=${Status}", &dep.name])
+            .args(["-W", "-f=${Status}|${Version}", &dep.name])
             .output()
             .with_context(|| format!("Failed to query dpkg for {}", dep.name))?;
         let stdout = String::from_utf8_lossy(&output.stdout);
-        if !stdout.contains("install ok installed") {
+        let mut parts = stdout.splitn(2, '|');
+        let status = parts.next().unwrap_or("").trim();
+        if status != "install ok installed" {
             return Ok(false);
         }
         if let Some(ver) = &dep.version {
-            let ver_output = Command::new("dpkg-query")
-                .args(["-W", "-f=${Version}", &dep.name])
-                .output()
-                .with_context(|| format!("Failed to query dpkg version for {}", dep.name))?;
-            let installed = parse_dpkg_version(
-                ver_output.status.success(),
-                &String::from_utf8_lossy(&ver_output.stdout),
-            );
-            return Ok(installed_version_matches(installed.as_deref(), ver));
+            let installed_ver = parts.next().unwrap_or("").trim();
+            return Ok(installed_ver == ver.as_str());
         }
         Ok(true)
     }

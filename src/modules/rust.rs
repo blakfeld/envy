@@ -88,11 +88,15 @@ impl Module for RustModule {
         _pm: &dyn PackageManager,
         _dep: &Dependency,
     ) -> Result<Option<String>> {
-        let rustc = std::env::var("HOME")
-            .ok()
-            .filter(|h| !h.is_empty())
-            .map(|home| format!("{home}/.cargo/bin/rustc"))
-            .unwrap_or_else(|| "rustc".to_string());
+        let rustc = which("rustc")
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| {
+                std::env::var("HOME")
+                    .ok()
+                    .filter(|h| !h.is_empty())
+                    .map(|home| format!("{home}/.cargo/bin/rustc"))
+                    .unwrap_or_else(|| "rustc".to_string())
+            });
         let out = Command::new(rustc).arg("--version").output();
         // "rustc 1.78.0 (9b00956e5 2024-04-29)" — take second token
         Ok(out.ok().and_then(|o| {
@@ -359,5 +363,37 @@ mod tests {
             assert_ne!(v, "xyzzy", "Version must not be placeholder");
             assert!(!v.is_empty());
         }
+    }
+
+    #[test]
+    fn rust_resolved_version_prefers_which_over_home_path() {
+        // If rustc is on PATH, resolved_version must find it even when $HOME is bogus.
+        // Kills `replace which -> Err` — mutation would skip which() and use $HOME fallback.
+        if which::which("rustc").is_err() {
+            return;
+        }
+        let _guard = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var("HOME").ok();
+        // SAFETY: serialised by ENV_LOCK; HOME is only read in the fallback path.
+        unsafe { std::env::set_var("HOME", "/nonexistent-bogus-home-devy-test") };
+        let pm = crate::package_manager::MockPackageManager::default();
+        let dep = Dependency::simple("rust");
+        let result = RustModule.resolved_version(&pm, &dep);
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+        assert!(
+            result.is_ok(),
+            "resolved_version must succeed when rustc is on PATH, even with bogus $HOME"
+        );
+        assert!(
+            result.unwrap().is_some(),
+            "resolved_version must return Some version when rustc is on PATH"
+        );
     }
 }

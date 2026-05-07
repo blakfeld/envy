@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use fs2::FileExt;
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
@@ -56,6 +57,22 @@ pub fn run(update: bool) -> Result<()> {
         .to_path_buf();
     let config = DevyConfig::load(&config_path)?;
     let pm = package_manager::detect()?;
+
+    // Acquire an exclusive advisory lock so concurrent `devy up` invocations
+    // (e.g. two devs on the same machine, parallel CI jobs) queue rather than race.
+    // Uses a dedicated guard file to avoid inode-swap conflicts with write_lock's
+    // rename strategy on devy.lock itself.
+    let guard_path = project_root.join(".devy-lock");
+    let _guard = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&guard_path)
+        .context("Failed to open process guard file")?;
+    _guard
+        .lock_exclusive()
+        .context("Failed to acquire process lock (is another devy process running?)")?;
+
     up_impl(
         &config,
         pm.as_ref(),
@@ -64,6 +81,7 @@ pub fn run(update: bool) -> Result<()> {
         &project_root,
         &project_root.join(crate::lock::PATH),
     )
+    // _guard dropped here → lock released
 }
 
 pub(crate) fn up_impl(
@@ -108,21 +126,32 @@ pub(crate) fn up_impl(
             .with_context(|| format!("{}: config validation failed", dep.name))?;
     }
 
+    // Pre-compute effective deps once so both phases use the same pinned versions.
+    let effective_deps: Vec<Dependency> = deps
+        .iter()
+        .map(|dep| apply_lock(dep, lock.as_ref()))
+        .collect();
+
     // Collect module-suggested env vars and PATH prepends after each dep installs.
     // This ensures failed installs don't pollute the environment config.
     let mut module_env: HashMap<String, String> = HashMap::new();
     let mut module_path_prepends: Vec<String> = Vec::new();
 
-    if !deps.is_empty() {
+    // Phase 1: install all binaries (no services started yet).
+    if !effective_deps.is_empty() {
         output::header("Dependencies");
-        for dep in &deps {
-            let effective = apply_lock(dep, lock.as_ref());
-            install_dep(pm, &effective, project_root)?;
-            let m = modules::get(&dep.name);
-            module_env.extend(m.env_vars(&effective, project_root));
-            module_path_prepends.extend(m.path_prepends(&effective, project_root));
+        for effective in &effective_deps {
+            install_binary(pm, effective, project_root)?;
+            let m = modules::get(&effective.name);
+            module_env.extend(m.env_vars(effective, project_root));
+            module_path_prepends.extend(m.path_prepends(effective, project_root));
         }
     }
+
+    // Write the lock immediately after all binaries are confirmed installed.
+    // Doing this before service start means a service failure doesn't leave the
+    // lock stale for the already-installed packages.
+    write_lock(&effective_deps, pm, lock_path)?;
 
     let merged_env = merge_env(module_env, &config.environment);
 
@@ -134,7 +163,10 @@ pub(crate) fn up_impl(
 
         if has_content && !env_mgr.is_available() {
             output::step(&format!("Installing {}", env_mgr.name()));
-            pm.install_package(&Dependency::simple(env_mgr.name()))
+            let shadowenv_dep = Dependency::simple(env_mgr.name());
+            pm.validate_config(&shadowenv_dep)
+                .context("shadowenv package manager config is invalid")?;
+            pm.install_package(&shadowenv_dep)
                 .context("Failed to install shadowenv")?;
             output::success(&format!("Installed {}", env_mgr.name()));
         }
@@ -188,8 +220,10 @@ pub(crate) fn up_impl(
         }
     }
 
-    // Write the lock file with resolved versions for every dependency.
-    write_lock(&deps, pm, lock_path)?;
+    // Phase 2: start services (after lock is written).
+    for effective in &effective_deps {
+        start_service_if_needed(pm, effective)?;
+    }
 
     if let Some(ref hook) = config.hooks.after_up {
         output::header("Hooks");
@@ -219,7 +253,9 @@ pub(crate) fn apply_lock(dep: &Dependency, lock: Option<&LockFile>) -> Dependenc
     dep.clone()
 }
 
-pub(crate) fn install_dep(
+/// Installs the binary for a dependency and runs post_setup. Does not start services.
+/// Call this in Phase 1 so the lock can be written before any service is started.
+pub(crate) fn install_binary(
     pm: &dyn package_manager::PackageManager,
     dep: &Dependency,
     project_root: &std::path::Path,
@@ -245,7 +281,7 @@ pub(crate) fn install_dep(
             spawn_cmd(
                 &DevyCommand {
                     cmd: cmd.clone(),
-                    cwd: None,
+                    cwd: Some(project_root.to_string_lossy().into_owned()),
                     shell,
                 },
                 "after_install",
@@ -259,21 +295,37 @@ pub(crate) fn install_dep(
         .post_setup(dep, pm, project_root)
         .with_context(|| format!("post_setup failed for {}", dep.name))?;
 
-    if module.is_service() {
-        if module.is_running(pm, dep)? {
-            output::skip(&format!("{} service already running", dep.name));
-        } else {
-            output::step(&format!("Starting {} service", dep.name));
-            module
-                .start(pm, dep)
-                .with_context(|| format!("Failed to start {} service", dep.name))?;
-            output::success(&format!("{} service started", dep.name));
-        }
-        output::step(&format!("Waiting for {} to be ready", dep.name));
-        module.wait_for_ready(dep)?;
+    Ok(())
+}
+
+/// Starts a service dependency if it isn't already running. No-op for non-service deps.
+/// Call this in Phase 2, after the lock has been written.
+pub(crate) fn start_service_if_needed(
+    pm: &dyn package_manager::PackageManager,
+    dep: &Dependency,
+) -> Result<()> {
+    let module = modules::get(&dep.name);
+    if !module.is_service() {
+        return Ok(());
+    }
+    if module.is_running(pm, dep)? {
+        output::skip(&format!("{} service already running", dep.name));
+    } else {
+        output::step(&format!("Starting {} service", dep.name));
+        module
+            .start(pm, dep)
+            .with_context(|| format!("Failed to start {} service", dep.name))?;
+        output::success(&format!("{} service started", dep.name));
+    }
+    output::step(&format!("Waiting for {} to be ready", dep.name));
+    if let Err(e) = module.wait_for_ready(dep) {
+        output::warn(&format!(
+            "{} is not yet responding to health checks — verify manually: {}",
+            dep.name, e
+        ));
+    } else {
         output::success(&format!("{} is ready", dep.name));
     }
-
     Ok(())
 }
 
@@ -510,35 +562,34 @@ mod tests {
         assert!(effective.version.is_none());
     }
 
-    // ── install_dep ───────────────────────────────────────────────────────────
+    // ── install_binary ────────────────────────────────────────────────────────
 
     #[test]
-    fn install_dep_propagates_install_error() {
-        // Kills `replace install_dep -> Ok(())` — mutation always returns Ok.
-        // Use node (non-service) to avoid wait_for_ready TCP check.
+    fn install_binary_propagates_install_error() {
+        // Kills `replace install_binary -> Ok(())` — mutation always returns Ok.
         let pm = MockPackageManager {
             install_fails: true,
             ..Default::default()
         };
         let dep = Dependency::simple("node");
         assert!(
-            install_dep(&pm, &dep, std::path::Path::new("/tmp")).is_err(),
+            install_binary(&pm, &dep, std::path::Path::new("/tmp")).is_err(),
             "install failure must propagate as Err"
         );
     }
 
     #[test]
-    fn install_dep_returns_ok_when_already_installed() {
+    fn install_binary_returns_ok_when_already_installed() {
         let pm = MockPackageManager {
             installed: true,
             ..Default::default()
         };
         let dep = Dependency::simple("node");
-        assert!(install_dep(&pm, &dep, std::path::Path::new("/tmp")).is_ok());
+        assert!(install_binary(&pm, &dep, std::path::Path::new("/tmp")).is_ok());
     }
 
     #[test]
-    fn install_dep_uses_shell_field_for_after_install() {
+    fn install_binary_uses_shell_field_for_after_install() {
         // dep.shell = "not-a-shell" must cause spawn_cmd to fail with a shell validation error.
         let dir = crate::test_support::tmp_dir();
         let pm = MockPackageManager::default(); // installed=false → install runs
@@ -550,10 +601,72 @@ mod tests {
             shell: Some("not-a-shell".into()),
             extra: HashMap::new(),
         };
-        let result = install_dep(&pm, &dep, &dir);
+        let result = install_binary(&pm, &dep, &dir);
         assert!(
             result.is_err(),
-            "install_dep must fail when dep.shell is not in the allowed shell list"
+            "install_binary must fail when dep.shell is not in the allowed shell list"
+        );
+    }
+
+    #[test]
+    fn install_binary_after_install_runs_in_project_root() {
+        // after_install must execute with cwd = project_root, not the invoker's CWD.
+        let dir = crate::test_support::tmp_dir();
+        let pm = MockPackageManager::default(); // installed=false → install runs
+        let dep = Dependency {
+            name: "node".into(),
+            version: None,
+            tap: None,
+            after_install: Some("touch marker".into()),
+            shell: Some("sh".into()),
+            extra: HashMap::new(),
+        };
+        install_binary(&pm, &dep, &dir).unwrap();
+        assert!(
+            dir.join("marker").exists(),
+            "after_install must run in project_root — marker file must be created there"
+        );
+    }
+
+    // ── start_service_if_needed ───────────────────────────────────────────────
+
+    #[test]
+    fn start_service_if_needed_is_noop_for_non_service() {
+        let pm = MockPackageManager::default();
+        let dep = Dependency::simple("node"); // not a service
+        assert!(start_service_if_needed(&pm, &dep).is_ok());
+        assert!(pm.started_services.borrow().is_empty());
+    }
+
+    #[test]
+    fn start_service_if_needed_skips_start_when_already_running() {
+        // wait_for_ready times out in tests (no live service), but the timeout is now a
+        // warning, not an error — so the function must return Ok.
+        let pm = MockPackageManager {
+            service_running: true,
+            ..Default::default()
+        };
+        let dep = Dependency::simple("mysql");
+        assert!(
+            start_service_if_needed(&pm, &dep).is_ok(),
+            "must return Ok even though health check times out in test environment"
+        );
+        assert!(
+            pm.started_services.borrow().is_empty(),
+            "start must not be called when service is already running"
+        );
+    }
+
+    #[test]
+    fn start_service_if_needed_propagates_start_error() {
+        let pm = MockPackageManager {
+            start_service_fails: true,
+            ..Default::default()
+        };
+        let dep = Dependency::simple("mysql");
+        assert!(
+            start_service_if_needed(&pm, &dep).is_err(),
+            "start failure must propagate as Err"
         );
     }
 
@@ -940,6 +1053,31 @@ mod tests {
         assert!(
             !env_mgr.setup_called.get(),
             "env_mgr.setup must not be called when there is no content and no existing file"
+        );
+    }
+
+    #[test]
+    fn up_impl_writes_lock_before_starting_services() {
+        // When service start fails, the lock must already have been written
+        // for the binary that was successfully installed.
+        // This ensures version pinning is not lost on partial failures.
+        let config = make_config(&["mysql"], HashMap::new());
+        let pm = MockPackageManager {
+            installed: false,          // binary not yet installed
+            start_service_fails: true, // service start will fail
+            ..Default::default()
+        };
+        let env_mgr = MockEnvManager::default();
+        let dir = crate::test_support::tmp_dir();
+        let lock = tmp_path();
+        let result = up_impl(&config, &pm, &env_mgr, false, &dir, &lock);
+        assert!(
+            result.is_err(),
+            "service start failure must propagate as Err"
+        );
+        assert!(
+            lock.exists(),
+            "lock file must be written even when service start fails"
         );
     }
 }
