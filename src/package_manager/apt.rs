@@ -105,7 +105,7 @@ impl PackageManager for Apt {
         }
         if let Some(ver) = &dep.version {
             let installed_ver = parts.next().unwrap_or("").trim();
-            return Ok(installed_ver == ver.as_str());
+            return Ok(installed_version_matches(Some(installed_ver), ver));
         }
         Ok(true)
     }
