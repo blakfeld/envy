@@ -65,7 +65,7 @@ impl Apt {
             .with_context(|| format!("Failed to run: sudo apt-get {}", args.join(" ")))?;
         if !status.success() {
             bail!(
-                "sudo apt-get {} exited with non-zero status",
+                "`sudo apt-get {}` failed — check the output above for details",
                 args.join(" ")
             );
         }
@@ -140,7 +140,7 @@ impl PackageManager for Apt {
             .status()
             .with_context(|| format!("Failed to start service: {name}"))?;
         if !status.success() {
-            bail!("systemctl start {name} failed");
+            bail!("`systemctl start {name}` failed — check the output above for details");
         }
         Ok(())
     }
@@ -154,7 +154,7 @@ impl PackageManager for Apt {
             .status()
             .with_context(|| format!("Failed to stop service: {name}"))?;
         if !status.success() {
-            bail!("systemctl stop {name} failed");
+            bail!("`systemctl stop {name}` failed — check the output above for details");
         }
         Ok(())
     }

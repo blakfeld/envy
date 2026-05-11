@@ -149,7 +149,7 @@ impl Module for PythonModule {
                 .status()
                 .context("Failed to create Python virtualenv")?;
             if !status.success() {
-                anyhow::bail!("`{python_bin} -m venv` failed");
+                anyhow::bail!("`{python_bin} -m venv` failed — check the output above for details");
             }
             output::success("Virtualenv created");
         }
@@ -189,7 +189,7 @@ impl Module for PythonModule {
         };
 
         if !status.success() {
-            anyhow::bail!("Python dependency install failed");
+            anyhow::bail!("Python dependency install failed — check the output above for details");
         }
         if let Some(ref m) = manifest {
             write_stamp(&stamp_path, m);

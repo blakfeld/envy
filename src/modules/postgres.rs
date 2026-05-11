@@ -74,6 +74,20 @@ impl Module for PostgresModule {
         Ok(())
     }
 
+    fn env_vars(
+        &self,
+        dep: &Dependency,
+        _project_root: &std::path::Path,
+    ) -> std::collections::HashMap<String, String> {
+        let p = port(dep).unwrap_or(5432);
+        let mut map = std::collections::HashMap::new();
+        map.insert(
+            "DATABASE_URL".into(),
+            format!("postgres://localhost:{p}/postgres"),
+        );
+        map
+    }
+
     fn service_name<'a>(&self, _dep: &'a Dependency) -> Cow<'a, str> {
         Cow::Borrowed("postgresql")
     }
@@ -123,6 +137,26 @@ mod tests {
             crate::config::ExtraValue::Number(port.into()),
         );
         Dependency::with_extra("postgresql", extra)
+    }
+
+    #[test]
+    fn env_vars_default_port() {
+        let dep = Dependency::simple("postgresql");
+        let vars = PostgresModule.env_vars(&dep, std::path::Path::new("/tmp"));
+        assert_eq!(
+            vars.get("DATABASE_URL").map(|s| s.as_str()),
+            Some("postgres://localhost:5432/postgres")
+        );
+    }
+
+    #[test]
+    fn env_vars_custom_port() {
+        let dep = dep_with_port(5433);
+        let vars = PostgresModule.env_vars(&dep, std::path::Path::new("/tmp"));
+        assert_eq!(
+            vars.get("DATABASE_URL").map(|s| s.as_str()),
+            Some("postgres://localhost:5433/postgres")
+        );
     }
 
     #[test]

@@ -45,7 +45,7 @@ pub(crate) fn spawn_cmd(cmd: &DevyCommand, label: &str) -> Result<()> {
         .with_context(|| format!("Failed to spawn '{}' via {}", label, cmd.shell))?;
     if !status.success() {
         bail!(
-            "'{}' command {:?} exited with status {}",
+            "'{}' command {:?} failed with exit status {} — check the output above for details",
             label,
             cmd.cmd,
             status.code().unwrap_or(-1)

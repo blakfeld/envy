@@ -72,6 +72,20 @@ impl Module for MysqlModule {
         Ok(())
     }
 
+    fn env_vars(
+        &self,
+        dep: &Dependency,
+        _project_root: &std::path::Path,
+    ) -> std::collections::HashMap<String, String> {
+        let p = port(dep).unwrap_or(3306);
+        let mut map = std::collections::HashMap::new();
+        map.insert(
+            "DATABASE_URL".into(),
+            format!("mysql://root@127.0.0.1:{p}/"),
+        );
+        map
+    }
+
     fn is_running(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
         pm.is_service_running(&self.service_name(dep))
     }
@@ -115,6 +129,33 @@ mod tests {
             shell: None,
             extra,
         }
+    }
+
+    // ── env_vars ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn env_vars_default_port() {
+        let dep = Dependency::simple("mysql");
+        let vars = MysqlModule.env_vars(&dep, std::path::Path::new("/tmp"));
+        assert_eq!(
+            vars.get("DATABASE_URL").map(|s| s.as_str()),
+            Some("mysql://root@127.0.0.1:3306/")
+        );
+    }
+
+    #[test]
+    fn env_vars_custom_port() {
+        let mut extra = HashMap::new();
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(3307u64.into()),
+        );
+        let dep = dep_with_extra(extra);
+        let vars = MysqlModule.env_vars(&dep, std::path::Path::new("/tmp"));
+        assert_eq!(
+            vars.get("DATABASE_URL").map(|s| s.as_str()),
+            Some("mysql://root@127.0.0.1:3307/")
+        );
     }
 
     // ── port ──────────────────────────────────────────────────────────────────

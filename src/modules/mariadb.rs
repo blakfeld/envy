@@ -73,6 +73,20 @@ impl Module for MariadbModule {
         Ok(())
     }
 
+    fn env_vars(
+        &self,
+        dep: &Dependency,
+        _project_root: &std::path::Path,
+    ) -> std::collections::HashMap<String, String> {
+        let p = port(dep).unwrap_or(3306);
+        let mut map = std::collections::HashMap::new();
+        map.insert(
+            "DATABASE_URL".into(),
+            format!("mysql://root@127.0.0.1:{p}/"),
+        );
+        map
+    }
+
     /// MariaDB's PM service is always "mariadb" — older brew formulas may have registered
     /// it as "mysql", but current formulae use the correct name.
     fn service_name<'a>(&self, _dep: &'a Dependency) -> Cow<'a, str> {
@@ -120,6 +134,26 @@ mod tests {
             crate::config::ExtraValue::Number(port.into()),
         );
         Dependency::with_extra("mariadb", extra)
+    }
+
+    #[test]
+    fn env_vars_default_port() {
+        let dep = Dependency::simple("mariadb");
+        let vars = MariadbModule.env_vars(&dep, std::path::Path::new("/tmp"));
+        assert_eq!(
+            vars.get("DATABASE_URL").map(|s| s.as_str()),
+            Some("mysql://root@127.0.0.1:3306/")
+        );
+    }
+
+    #[test]
+    fn env_vars_custom_port() {
+        let dep = dep_with_port(3307);
+        let vars = MariadbModule.env_vars(&dep, std::path::Path::new("/tmp"));
+        assert_eq!(
+            vars.get("DATABASE_URL").map(|s| s.as_str()),
+            Some("mysql://root@127.0.0.1:3307/")
+        );
     }
 
     #[test]

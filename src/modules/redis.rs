@@ -49,6 +49,17 @@ impl Module for RedisModule {
         pm.stop_service(&self.service_name(dep))
     }
 
+    fn env_vars(
+        &self,
+        dep: &Dependency,
+        _project_root: &std::path::Path,
+    ) -> std::collections::HashMap<String, String> {
+        let port = super::extra_port(dep, "port", 6379).unwrap_or(6379);
+        let mut map = std::collections::HashMap::new();
+        map.insert("REDIS_URL".into(), format!("redis://127.0.0.1:{port}"));
+        map
+    }
+
     fn health_check(&self, dep: &Dependency) -> Result<()> {
         let port = super::extra_port(dep, "port", 6379)?;
         let addr: SocketAddr = format!("127.0.0.1:{port}").parse()?;
@@ -74,6 +85,31 @@ mod tests {
     #[test]
     fn redis_module_is_service() {
         assert!(RedisModule.is_service());
+    }
+
+    #[test]
+    fn env_vars_default_port() {
+        let dep = Dependency::simple("redis");
+        let vars = RedisModule.env_vars(&dep, std::path::Path::new("/tmp"));
+        assert_eq!(
+            vars.get("REDIS_URL").map(|s| s.as_str()),
+            Some("redis://127.0.0.1:6379")
+        );
+    }
+
+    #[test]
+    fn env_vars_custom_port() {
+        let mut extra = std::collections::HashMap::new();
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(6380u64.into()),
+        );
+        let dep = Dependency::with_extra("redis", extra);
+        let vars = RedisModule.env_vars(&dep, std::path::Path::new("/tmp"));
+        assert_eq!(
+            vars.get("REDIS_URL").map(|s| s.as_str()),
+            Some("redis://127.0.0.1:6380")
+        );
     }
 
     #[test]

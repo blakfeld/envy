@@ -1,11 +1,14 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use which::which;
 
 use crate::config::Dependency;
+use crate::output;
 use crate::package_manager::PackageManager;
 
 use super::Module;
+use super::helpers::{stamp_matches, write_stamp};
 
 pub struct BunModule;
 
@@ -51,8 +54,46 @@ impl Module for BunModule {
             .map_err(|e| anyhow::anyhow!("Failed to run Bun installer: {e}"))?;
 
         if !status.success() {
-            bail!("Bun installation failed");
+            bail!("Bun installation failed — check the output above for details");
         }
+        Ok(())
+    }
+
+    fn post_setup(
+        &self,
+        _dep: &Dependency,
+        _pm: &dyn PackageManager,
+        project_root: &Path,
+    ) -> Result<()> {
+        if !project_root.join("package.json").exists() {
+            return Ok(());
+        }
+        let lockfile = project_root.join("bun.lockb");
+        let package_json = project_root.join("package.json");
+        let manifest: &Path = if lockfile.exists() {
+            &lockfile
+        } else {
+            &package_json
+        };
+        let stamp_path = project_root.join(".devy_bun_stamp");
+        if stamp_matches(&stamp_path, manifest) {
+            output::skip("Bun dependencies up to date");
+            return Ok(());
+        }
+        let bun = bun_bin()
+            .filter(|b| std::path::Path::new(b).exists())
+            .unwrap_or_else(|| "bun".into());
+        output::step("Running bun install");
+        let status = Command::new(&bun)
+            .arg("install")
+            .current_dir(project_root)
+            .status()
+            .context("Failed to run `bun install`")?;
+        if !status.success() {
+            anyhow::bail!("`bun install` failed — check the output above for details");
+        }
+        write_stamp(&stamp_path, manifest);
+        output::success("Bun dependencies installed");
         Ok(())
     }
 
@@ -227,6 +268,64 @@ mod tests {
         assert!(
             result.is_err(),
             "install must return Err when script exits non-zero"
+        );
+    }
+
+    fn file_mtime_secs(path: &std::path::Path) -> u64 {
+        std::fs::metadata(path)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    #[test]
+    fn bun_post_setup_no_package_json_is_noop() {
+        let dir = crate::test_support::tmp_dir();
+        let pm = MockPackageManager::default();
+        assert!(
+            BunModule
+                .post_setup(&Dependency::simple("bun"), &pm, &dir)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn bun_post_setup_skips_install_when_stamp_matches() {
+        let dir = crate::test_support::tmp_dir();
+        let pkg_json = dir.join("package.json");
+        std::fs::write(&pkg_json, r#"{"name":"test"}"#).unwrap();
+        std::fs::write(
+            dir.join(".devy_bun_stamp"),
+            file_mtime_secs(&pkg_json).to_string(),
+        )
+        .unwrap();
+        let pm = MockPackageManager::default();
+        assert!(
+            BunModule
+                .post_setup(&Dependency::simple("bun"), &pm, &dir)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn bun_post_setup_prefers_bun_lockb_as_stamp_target() {
+        let dir = crate::test_support::tmp_dir();
+        std::fs::write(dir.join("package.json"), r#"{"name":"test"}"#).unwrap();
+        let lock = dir.join("bun.lockb");
+        std::fs::write(&lock, "").unwrap();
+        std::fs::write(
+            dir.join(".devy_bun_stamp"),
+            file_mtime_secs(&lock).to_string(),
+        )
+        .unwrap();
+        let pm = MockPackageManager::default();
+        assert!(
+            BunModule
+                .post_setup(&Dependency::simple("bun"), &pm, &dir)
+                .is_ok()
         );
     }
 

@@ -166,7 +166,11 @@ pub trait Module: Sync {
                 std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
             }
         }
-        anyhow::bail!("{} did not stop after {} attempts", dep.name, max)
+        anyhow::bail!(
+            "{} did not stop after {} attempts — try stopping it manually or check its logs",
+            dep.name,
+            max
+        )
     }
 
     /// Environment variables this module injects when active (e.g. SMTP_HOST, VAULT_ADDR).

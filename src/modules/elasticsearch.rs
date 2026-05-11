@@ -86,7 +86,7 @@ pub(crate) fn classify_status(status: &str) -> Result<()> {
     // Elasticsearch 8.x root endpoint doesn't include cluster health status —
     // a reachable 200 response is sufficient to declare the node ready.
     if !status.is_empty() {
-        bail!("Elasticsearch cluster status is '{status}'");
+        bail!("Elasticsearch cluster status is '{status}' (expected 'green', 'yellow', or 'red')");
     }
     Ok(())
 }

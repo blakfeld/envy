@@ -1,8 +1,12 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use std::path::Path;
+use std::process::Command;
 
 use crate::config::Dependency;
+use crate::output;
 use crate::package_manager::PackageManager;
 
+use super::helpers::{stamp_matches, write_stamp};
 use super::{Module, pm_dep};
 
 pub struct ErlangModule;
@@ -21,6 +25,37 @@ impl Module for ErlangModule {
 
     fn install(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<()> {
         pm.install_package(&pm_dep(dep, package_name(pm)))
+    }
+
+    fn post_setup(
+        &self,
+        _dep: &Dependency,
+        _pm: &dyn PackageManager,
+        project_root: &Path,
+    ) -> Result<()> {
+        let rebar_config = project_root.join("rebar.config");
+        if !rebar_config.exists() {
+            return Ok(());
+        }
+        let lock = project_root.join("rebar.lock");
+        let manifest = if lock.exists() { lock } else { rebar_config };
+        let stamp_path = project_root.join(".devy_erlang_stamp");
+        if stamp_matches(&stamp_path, &manifest) {
+            output::skip("Erlang dependencies up to date");
+            return Ok(());
+        }
+        output::step("Running rebar3 get-deps");
+        let status = Command::new("rebar3")
+            .arg("get-deps")
+            .current_dir(project_root)
+            .status()
+            .context("Failed to run `rebar3 get-deps`")?;
+        if !status.success() {
+            anyhow::bail!("`rebar3 get-deps` failed — check the output above for details");
+        }
+        write_stamp(&stamp_path, &manifest);
+        output::success("Erlang dependencies fetched");
+        Ok(())
     }
 }
 
@@ -94,6 +129,64 @@ mod tests {
             ErlangModule
                 .install(&pm, &Dependency::simple("erlang"))
                 .is_err()
+        );
+    }
+
+    fn file_mtime_secs(path: &std::path::Path) -> u64 {
+        std::fs::metadata(path)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    #[test]
+    fn erlang_post_setup_no_rebar_config_is_noop() {
+        let dir = crate::test_support::tmp_dir();
+        let pm = MockPackageManager::default();
+        assert!(
+            ErlangModule
+                .post_setup(&Dependency::simple("erlang"), &pm, &dir)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn erlang_post_setup_skips_rebar3_when_stamp_matches() {
+        let dir = crate::test_support::tmp_dir();
+        let rebar_config = dir.join("rebar.config");
+        std::fs::write(&rebar_config, "").unwrap();
+        std::fs::write(
+            dir.join(".devy_erlang_stamp"),
+            file_mtime_secs(&rebar_config).to_string(),
+        )
+        .unwrap();
+        let pm = MockPackageManager::default();
+        assert!(
+            ErlangModule
+                .post_setup(&Dependency::simple("erlang"), &pm, &dir)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn erlang_post_setup_prefers_rebar_lock_as_stamp_target() {
+        let dir = crate::test_support::tmp_dir();
+        std::fs::write(dir.join("rebar.config"), "").unwrap();
+        let lock = dir.join("rebar.lock");
+        std::fs::write(&lock, "").unwrap();
+        std::fs::write(
+            dir.join(".devy_erlang_stamp"),
+            file_mtime_secs(&lock).to_string(),
+        )
+        .unwrap();
+        let pm = MockPackageManager::default();
+        assert!(
+            ErlangModule
+                .post_setup(&Dependency::simple("erlang"), &pm, &dir)
+                .is_ok()
         );
     }
 }

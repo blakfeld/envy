@@ -1,10 +1,13 @@
 use anyhow::{Context, Result, bail};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use which::which;
 
 use crate::config::Dependency;
+use crate::output;
 use crate::package_manager::PackageManager;
 
+use super::helpers::{stamp_matches, write_stamp};
 use super::{Module, extra_strs, run_cmd};
 
 pub struct RustModule;
@@ -56,7 +59,7 @@ impl Module for RustModule {
                 .status()
                 .context("Failed to run rustup installer")?;
             if !status.success() {
-                bail!("rustup installation failed");
+                bail!("rustup installation failed — check the output above for details");
             }
         }
 
@@ -81,6 +84,37 @@ impl Module for RustModule {
 
     fn source(&self) -> Option<&'static str> {
         Some("rustup")
+    }
+
+    fn post_setup(
+        &self,
+        _dep: &Dependency,
+        _pm: &dyn PackageManager,
+        project_root: &Path,
+    ) -> Result<()> {
+        let cargo_toml = project_root.join("Cargo.toml");
+        if !cargo_toml.exists() {
+            return Ok(());
+        }
+        let lock = project_root.join("Cargo.lock");
+        let manifest = if lock.exists() { lock } else { cargo_toml };
+        let stamp_path = project_root.join(".devy_rust_stamp");
+        if stamp_matches(&stamp_path, &manifest) {
+            output::skip("Rust dependencies up to date");
+            return Ok(());
+        }
+        output::step("Running cargo fetch");
+        let status = Command::new("cargo")
+            .arg("fetch")
+            .current_dir(project_root)
+            .status()
+            .context("Failed to run `cargo fetch`")?;
+        if !status.success() {
+            anyhow::bail!("`cargo fetch` failed — check the output above for details");
+        }
+        write_stamp(&stamp_path, &manifest);
+        output::success("Rust dependencies fetched");
+        Ok(())
     }
 
     fn resolved_version(
@@ -363,6 +397,67 @@ mod tests {
             assert_ne!(v, "xyzzy", "Version must not be placeholder");
             assert!(!v.is_empty());
         }
+    }
+
+    fn file_mtime_secs(path: &std::path::Path) -> u64 {
+        std::fs::metadata(path)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    #[test]
+    fn rust_post_setup_no_cargo_toml_is_noop() {
+        let dir = crate::test_support::tmp_dir();
+        let pm = crate::package_manager::MockPackageManager::default();
+        assert!(
+            RustModule
+                .post_setup(&Dependency::simple("rust"), &pm, &dir)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn rust_post_setup_skips_cargo_fetch_when_stamp_matches() {
+        let dir = crate::test_support::tmp_dir();
+        let cargo_toml = dir.join("Cargo.toml");
+        std::fs::write(&cargo_toml, "[package]\nname = \"test\"").unwrap();
+        std::fs::write(
+            dir.join(".devy_rust_stamp"),
+            file_mtime_secs(&cargo_toml).to_string(),
+        )
+        .unwrap();
+        let pm = crate::package_manager::MockPackageManager::default();
+        assert!(
+            RustModule
+                .post_setup(&Dependency::simple("rust"), &pm, &dir)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn rust_post_setup_prefers_cargo_lock_as_stamp_target() {
+        // When Cargo.lock exists, it should be used as the stamp target.
+        // Verify by writing a stamp matching Cargo.lock mtime — cargo would be
+        // invoked (and likely fail) if the stamp check used Cargo.toml instead.
+        let dir = crate::test_support::tmp_dir();
+        std::fs::write(dir.join("Cargo.toml"), "[package]").unwrap();
+        let lock = dir.join("Cargo.lock");
+        std::fs::write(&lock, "").unwrap();
+        std::fs::write(
+            dir.join(".devy_rust_stamp"),
+            file_mtime_secs(&lock).to_string(),
+        )
+        .unwrap();
+        let pm = crate::package_manager::MockPackageManager::default();
+        assert!(
+            RustModule
+                .post_setup(&Dependency::simple("rust"), &pm, &dir)
+                .is_ok()
+        );
     }
 
     #[test]

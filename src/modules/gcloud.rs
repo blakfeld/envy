@@ -68,7 +68,7 @@ impl Module for GcloudModule {
                     .status()
                     .map_err(|e| anyhow::anyhow!("Failed to run gcloud installer: {e}"))?;
                 if !status.success() {
-                    bail!("gcloud SDK installation failed");
+                    bail!("gcloud SDK installation failed — check the output above for details");
                 }
             }
         }

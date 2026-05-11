@@ -74,7 +74,10 @@ impl Homebrew {
             .status()
             .with_context(|| format!("Failed to run: brew {}", args.join(" ")))?;
         if !status.success() {
-            bail!("brew {} exited with non-zero status", args.join(" "));
+            bail!(
+                "`brew {}` failed — check the output above for details",
+                args.join(" ")
+            );
         }
         Ok(())
     }

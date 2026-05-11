@@ -1,10 +1,12 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use std::path::Path;
+use std::process::Command;
 
 use crate::config::Dependency;
+use crate::output;
 use crate::package_manager::PackageManager;
 
-use crate::output;
-
+use super::helpers::{stamp_matches, write_stamp};
 use super::{Module, pm_dep};
 
 pub struct ElixirModule;
@@ -31,6 +33,37 @@ impl Module for ElixirModule {
             output::success("erlang installed");
         }
         pm.install_package(&pm_dep(dep, package_name(pm)))
+    }
+
+    fn post_setup(
+        &self,
+        _dep: &Dependency,
+        _pm: &dyn PackageManager,
+        project_root: &Path,
+    ) -> Result<()> {
+        let mix_exs = project_root.join("mix.exs");
+        if !mix_exs.exists() {
+            return Ok(());
+        }
+        let lock = project_root.join("mix.lock");
+        let manifest = if lock.exists() { lock } else { mix_exs };
+        let stamp_path = project_root.join(".devy_elixir_stamp");
+        if stamp_matches(&stamp_path, &manifest) {
+            output::skip("Elixir dependencies up to date");
+            return Ok(());
+        }
+        output::step("Running mix deps.get");
+        let status = Command::new("mix")
+            .arg("deps.get")
+            .current_dir(project_root)
+            .status()
+            .context("Failed to run `mix deps.get`")?;
+        if !status.success() {
+            anyhow::bail!("`mix deps.get` failed — check the output above for details");
+        }
+        write_stamp(&stamp_path, &manifest);
+        output::success("Elixir dependencies installed");
+        Ok(())
     }
 }
 
@@ -143,6 +176,64 @@ mod tests {
             1,
             "Only elixir should be installed when erlang is already present; got: {:?}",
             pm.installed_packages.borrow()
+        );
+    }
+
+    fn file_mtime_secs(path: &std::path::Path) -> u64 {
+        std::fs::metadata(path)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    #[test]
+    fn elixir_post_setup_no_mix_exs_is_noop() {
+        let dir = crate::test_support::tmp_dir();
+        let pm = MockPackageManager::default();
+        assert!(
+            ElixirModule
+                .post_setup(&Dependency::simple("elixir"), &pm, &dir)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn elixir_post_setup_skips_mix_when_stamp_matches() {
+        let dir = crate::test_support::tmp_dir();
+        let mix_exs = dir.join("mix.exs");
+        std::fs::write(&mix_exs, "").unwrap();
+        std::fs::write(
+            dir.join(".devy_elixir_stamp"),
+            file_mtime_secs(&mix_exs).to_string(),
+        )
+        .unwrap();
+        let pm = MockPackageManager::default();
+        assert!(
+            ElixirModule
+                .post_setup(&Dependency::simple("elixir"), &pm, &dir)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn elixir_post_setup_prefers_mix_lock_as_stamp_target() {
+        let dir = crate::test_support::tmp_dir();
+        std::fs::write(dir.join("mix.exs"), "").unwrap();
+        let lock = dir.join("mix.lock");
+        std::fs::write(&lock, "").unwrap();
+        std::fs::write(
+            dir.join(".devy_elixir_stamp"),
+            file_mtime_secs(&lock).to_string(),
+        )
+        .unwrap();
+        let pm = MockPackageManager::default();
+        assert!(
+            ElixirModule
+                .post_setup(&Dependency::simple("elixir"), &pm, &dir)
+                .is_ok()
         );
     }
 

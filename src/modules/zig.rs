@@ -1,8 +1,12 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use std::path::Path;
+use std::process::Command;
 
 use crate::config::Dependency;
+use crate::output;
 use crate::package_manager::PackageManager;
 
+use super::helpers::{stamp_matches, write_stamp};
 use super::{Module, pm_dep};
 
 // apt: `zig` may not be available in standard Ubuntu repos on older releases.
@@ -23,6 +27,35 @@ impl Module for ZigModule {
 
     fn install(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<()> {
         pm.install_package(&pm_dep(dep, package_name(pm)))
+    }
+
+    fn post_setup(
+        &self,
+        _dep: &Dependency,
+        _pm: &dyn PackageManager,
+        project_root: &Path,
+    ) -> Result<()> {
+        let build_zon = project_root.join("build.zig.zon");
+        if !build_zon.exists() {
+            return Ok(());
+        }
+        let stamp_path = project_root.join(".devy_zig_stamp");
+        if stamp_matches(&stamp_path, &build_zon) {
+            output::skip("Zig dependencies up to date");
+            return Ok(());
+        }
+        output::step("Running zig build");
+        let status = Command::new("zig")
+            .arg("build")
+            .current_dir(project_root)
+            .status()
+            .context("Failed to run `zig build`")?;
+        if !status.success() {
+            anyhow::bail!("`zig build` failed — check the output above for details");
+        }
+        write_stamp(&stamp_path, &build_zon);
+        output::success("Zig project built");
+        Ok(())
     }
 }
 
@@ -84,5 +117,44 @@ mod tests {
             ..Default::default()
         };
         assert!(ZigModule.install(&pm, &Dependency::simple("zig")).is_err());
+    }
+
+    fn file_mtime_secs(path: &std::path::Path) -> u64 {
+        std::fs::metadata(path)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    #[test]
+    fn zig_post_setup_no_build_zon_is_noop() {
+        let dir = crate::test_support::tmp_dir();
+        let pm = MockPackageManager::default();
+        assert!(
+            ZigModule
+                .post_setup(&Dependency::simple("zig"), &pm, &dir)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn zig_post_setup_skips_build_when_stamp_matches() {
+        let dir = crate::test_support::tmp_dir();
+        let zon = dir.join("build.zig.zon");
+        std::fs::write(&zon, "").unwrap();
+        std::fs::write(
+            dir.join(".devy_zig_stamp"),
+            file_mtime_secs(&zon).to_string(),
+        )
+        .unwrap();
+        let pm = MockPackageManager::default();
+        assert!(
+            ZigModule
+                .post_setup(&Dependency::simple("zig"), &pm, &dir)
+                .is_ok()
+        );
     }
 }

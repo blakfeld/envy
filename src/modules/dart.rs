@@ -1,8 +1,12 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use std::path::Path;
+use std::process::Command;
 
 use crate::config::Dependency;
+use crate::output;
 use crate::package_manager::PackageManager;
 
+use super::helpers::{stamp_matches, write_stamp};
 use super::{Module, pm_dep};
 
 // Flutter projects should use `flutter` instead — it bundles its own Dart SDK.
@@ -22,6 +26,37 @@ impl Module for DartModule {
 
     fn install(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<()> {
         pm.install_package(&pm_dep(dep, package_name(pm)))
+    }
+
+    fn post_setup(
+        &self,
+        _dep: &Dependency,
+        _pm: &dyn PackageManager,
+        project_root: &Path,
+    ) -> Result<()> {
+        let pubspec = project_root.join("pubspec.yaml");
+        if !pubspec.exists() {
+            return Ok(());
+        }
+        let lock = project_root.join("pubspec.lock");
+        let manifest = if lock.exists() { lock } else { pubspec };
+        let stamp_path = project_root.join(".devy_dart_stamp");
+        if stamp_matches(&stamp_path, &manifest) {
+            output::skip("Dart dependencies up to date");
+            return Ok(());
+        }
+        output::step("Running dart pub get");
+        let status = Command::new("dart")
+            .args(["pub", "get"])
+            .current_dir(project_root)
+            .status()
+            .context("Failed to run `dart pub get`")?;
+        if !status.success() {
+            anyhow::bail!("`dart pub get` failed — check the output above for details");
+        }
+        write_stamp(&stamp_path, &manifest);
+        output::success("Dart dependencies installed");
+        Ok(())
     }
 }
 
@@ -86,6 +121,64 @@ mod tests {
             DartModule
                 .install(&pm, &Dependency::simple("dart"))
                 .is_err()
+        );
+    }
+
+    fn file_mtime_secs(path: &std::path::Path) -> u64 {
+        std::fs::metadata(path)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    #[test]
+    fn dart_post_setup_no_pubspec_is_noop() {
+        let dir = crate::test_support::tmp_dir();
+        let pm = MockPackageManager::default();
+        assert!(
+            DartModule
+                .post_setup(&Dependency::simple("dart"), &pm, &dir)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn dart_post_setup_skips_pub_get_when_stamp_matches() {
+        let dir = crate::test_support::tmp_dir();
+        let pubspec = dir.join("pubspec.yaml");
+        std::fs::write(&pubspec, "name: test").unwrap();
+        std::fs::write(
+            dir.join(".devy_dart_stamp"),
+            file_mtime_secs(&pubspec).to_string(),
+        )
+        .unwrap();
+        let pm = MockPackageManager::default();
+        assert!(
+            DartModule
+                .post_setup(&Dependency::simple("dart"), &pm, &dir)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn dart_post_setup_prefers_pubspec_lock_as_stamp_target() {
+        let dir = crate::test_support::tmp_dir();
+        std::fs::write(dir.join("pubspec.yaml"), "name: test").unwrap();
+        let lock = dir.join("pubspec.lock");
+        std::fs::write(&lock, "").unwrap();
+        std::fs::write(
+            dir.join(".devy_dart_stamp"),
+            file_mtime_secs(&lock).to_string(),
+        )
+        .unwrap();
+        let pm = MockPackageManager::default();
+        assert!(
+            DartModule
+                .post_setup(&Dependency::simple("dart"), &pm, &dir)
+                .is_ok()
         );
     }
 }

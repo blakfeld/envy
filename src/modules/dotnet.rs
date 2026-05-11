@@ -1,8 +1,12 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use crate::config::Dependency;
+use crate::output;
 use crate::package_manager::PackageManager;
 
+use super::helpers::{stamp_matches, write_stamp};
 use super::{Module, pm_dep};
 
 pub struct DotnetModule;
@@ -14,6 +18,21 @@ fn major_version(dep: &Dependency) -> u32 {
         .and_then(|v| v.split('.').next())
         .and_then(|s| s.parse().ok())
         .unwrap_or(8)
+}
+
+/// Finds the first `.sln` (preferred) or `.csproj` in the project root.
+fn find_dotnet_manifest(project_root: &Path) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(project_root).ok()?;
+    let mut csproj: Option<PathBuf> = None;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        match path.extension().and_then(|e| e.to_str()) {
+            Some("sln") => return Some(path),
+            Some("csproj") if csproj.is_none() => csproj = Some(path),
+            _ => {}
+        }
+    }
+    csproj
 }
 
 fn package_name(pm: &dyn PackageManager, dep: &Dependency) -> String {
@@ -34,6 +53,34 @@ impl Module for DotnetModule {
     fn install(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<()> {
         let name = package_name(pm, dep);
         pm.install_package(&pm_dep(dep, &name))
+    }
+
+    fn post_setup(
+        &self,
+        _dep: &Dependency,
+        _pm: &dyn PackageManager,
+        project_root: &Path,
+    ) -> Result<()> {
+        let Some(manifest) = find_dotnet_manifest(project_root) else {
+            return Ok(());
+        };
+        let stamp_path = project_root.join(".devy_dotnet_stamp");
+        if stamp_matches(&stamp_path, &manifest) {
+            output::skip(".NET dependencies up to date");
+            return Ok(());
+        }
+        output::step("Running dotnet restore");
+        let status = Command::new("dotnet")
+            .arg("restore")
+            .current_dir(project_root)
+            .status()
+            .context("Failed to run `dotnet restore`")?;
+        if !status.success() {
+            anyhow::bail!("`dotnet restore` failed — check the output above for details");
+        }
+        write_stamp(&stamp_path, &manifest);
+        output::success(".NET dependencies restored");
+        Ok(())
     }
 }
 
@@ -132,6 +179,74 @@ mod tests {
             DotnetModule
                 .install(&pm, &Dependency::simple("dotnet"))
                 .is_err()
+        );
+    }
+
+    fn file_mtime_secs(path: &std::path::Path) -> u64 {
+        std::fs::metadata(path)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    #[test]
+    fn find_dotnet_manifest_returns_none_for_empty_dir() {
+        let dir = crate::test_support::tmp_dir();
+        assert!(find_dotnet_manifest(&dir).is_none());
+    }
+
+    #[test]
+    fn find_dotnet_manifest_finds_csproj() {
+        let dir = crate::test_support::tmp_dir();
+        std::fs::write(dir.join("MyApp.csproj"), "").unwrap();
+        assert!(
+            find_dotnet_manifest(&dir)
+                .unwrap()
+                .ends_with("MyApp.csproj")
+        );
+    }
+
+    #[test]
+    fn find_dotnet_manifest_prefers_sln_over_csproj() {
+        let dir = crate::test_support::tmp_dir();
+        std::fs::write(dir.join("MyApp.csproj"), "").unwrap();
+        std::fs::write(dir.join("Solution.sln"), "").unwrap();
+        assert!(
+            find_dotnet_manifest(&dir)
+                .unwrap()
+                .ends_with("Solution.sln")
+        );
+    }
+
+    #[test]
+    fn dotnet_post_setup_no_manifest_is_noop() {
+        let dir = crate::test_support::tmp_dir();
+        let pm = crate::package_manager::MockPackageManager::default();
+        assert!(
+            DotnetModule
+                .post_setup(&Dependency::simple("dotnet"), &pm, &dir)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn dotnet_post_setup_skips_restore_when_stamp_matches() {
+        let dir = crate::test_support::tmp_dir();
+        let csproj = dir.join("App.csproj");
+        std::fs::write(&csproj, "").unwrap();
+        std::fs::write(
+            dir.join(".devy_dotnet_stamp"),
+            file_mtime_secs(&csproj).to_string(),
+        )
+        .unwrap();
+        let pm = crate::package_manager::MockPackageManager::default();
+        assert!(
+            DotnetModule
+                .post_setup(&Dependency::simple("dotnet"), &pm, &dir)
+                .is_ok()
         );
     }
 }

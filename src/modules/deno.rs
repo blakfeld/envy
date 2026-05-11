@@ -1,11 +1,14 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use which::which;
 
 use crate::config::Dependency;
+use crate::output;
 use crate::package_manager::PackageManager;
 
 use super::Module;
+use super::helpers::{stamp_matches, write_stamp};
 
 pub struct DenoModule;
 
@@ -60,8 +63,48 @@ impl Module for DenoModule {
             .map_err(|e| anyhow::anyhow!("Failed to run Deno installer: {e}"))?;
 
         if !status.success() {
-            bail!("Deno installation failed");
+            bail!("Deno installation failed — check the output above for details");
         }
+        Ok(())
+    }
+
+    fn post_setup(
+        &self,
+        _dep: &Dependency,
+        _pm: &dyn PackageManager,
+        project_root: &Path,
+    ) -> Result<()> {
+        let deno_json = project_root.join("deno.json");
+        let deno_jsonc = project_root.join("deno.jsonc");
+        let manifest = if deno_json.exists() {
+            Some(deno_json)
+        } else if deno_jsonc.exists() {
+            Some(deno_jsonc)
+        } else {
+            None
+        };
+        let Some(manifest) = manifest else {
+            return Ok(());
+        };
+        let stamp_path = project_root.join(".devy_deno_stamp");
+        if stamp_matches(&stamp_path, &manifest) {
+            output::skip("Deno dependencies up to date");
+            return Ok(());
+        }
+        let deno = deno_bin()
+            .filter(|b| std::path::Path::new(b).exists())
+            .unwrap_or_else(|| "deno".into());
+        output::step("Running deno install");
+        let status = Command::new(&deno)
+            .arg("install")
+            .current_dir(project_root)
+            .status()
+            .context("Failed to run `deno install`")?;
+        if !status.success() {
+            anyhow::bail!("`deno install` failed — check the output above for details");
+        }
+        write_stamp(&stamp_path, &manifest);
+        output::success("Deno dependencies installed");
         Ok(())
     }
 
@@ -235,6 +278,82 @@ mod tests {
         assert!(
             result.is_err(),
             "install must return Err when script exits non-zero"
+        );
+    }
+
+    fn file_mtime_secs(path: &std::path::Path) -> u64 {
+        std::fs::metadata(path)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    #[test]
+    fn deno_post_setup_no_config_file_is_noop() {
+        let dir = crate::test_support::tmp_dir();
+        let pm = MockPackageManager::default();
+        assert!(
+            DenoModule
+                .post_setup(&Dependency::simple("deno"), &pm, &dir)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn deno_post_setup_skips_install_when_stamp_matches_deno_json() {
+        let dir = crate::test_support::tmp_dir();
+        let cfg = dir.join("deno.json");
+        std::fs::write(&cfg, r#"{"imports":{}}"#).unwrap();
+        std::fs::write(
+            dir.join(".devy_deno_stamp"),
+            file_mtime_secs(&cfg).to_string(),
+        )
+        .unwrap();
+        let pm = MockPackageManager::default();
+        assert!(
+            DenoModule
+                .post_setup(&Dependency::simple("deno"), &pm, &dir)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn deno_post_setup_skips_install_when_stamp_matches_deno_jsonc() {
+        let dir = crate::test_support::tmp_dir();
+        let cfg = dir.join("deno.jsonc");
+        std::fs::write(&cfg, "{}").unwrap();
+        std::fs::write(
+            dir.join(".devy_deno_stamp"),
+            file_mtime_secs(&cfg).to_string(),
+        )
+        .unwrap();
+        let pm = MockPackageManager::default();
+        assert!(
+            DenoModule
+                .post_setup(&Dependency::simple("deno"), &pm, &dir)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn deno_post_setup_prefers_deno_json_over_deno_jsonc() {
+        let dir = crate::test_support::tmp_dir();
+        let json = dir.join("deno.json");
+        std::fs::write(&json, "{}").unwrap();
+        std::fs::write(dir.join("deno.jsonc"), "{}").unwrap();
+        std::fs::write(
+            dir.join(".devy_deno_stamp"),
+            file_mtime_secs(&json).to_string(),
+        )
+        .unwrap();
+        let pm = MockPackageManager::default();
+        assert!(
+            DenoModule
+                .post_setup(&Dependency::simple("deno"), &pm, &dir)
+                .is_ok()
         );
     }
 

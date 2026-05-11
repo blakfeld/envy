@@ -188,7 +188,7 @@ impl Module for RubyModule {
             .status()
             .context("Failed to run `bundle install`")?;
         if !status.success() {
-            anyhow::bail!("`bundle install` failed");
+            anyhow::bail!("`bundle install` failed — check the output above for details");
         }
         std::fs::create_dir_all(
             stamp_path

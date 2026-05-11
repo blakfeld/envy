@@ -97,9 +97,12 @@ pub(super) fn run_cmd(prog: &str, args: &[&str]) -> Result<()> {
     let status = Command::new(prog)
         .args(args)
         .status()
-        .with_context(|| format!("failed to start `{prog}`"))?;
+        .with_context(|| format!("Failed to start `{prog}`"))?;
     if !status.success() {
-        anyhow::bail!("`{prog} {}` failed", args.join(" "));
+        anyhow::bail!(
+            "`{prog} {}` failed — check the output above for details",
+            args.join(" ")
+        );
     }
     Ok(())
 }

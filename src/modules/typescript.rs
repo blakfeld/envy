@@ -1,8 +1,13 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use std::path::Path;
+use std::process::Command;
 
 use crate::config::Dependency;
+use crate::output;
 use crate::package_manager::PackageManager;
 
+use super::helpers::{stamp_matches, write_stamp};
+use super::node::detect_node_pm;
 use super::{Module, extra_strs, node_pkg, pm_dep, run_cmd};
 
 pub struct TypeScriptModule;
@@ -23,6 +28,37 @@ impl Module for TypeScriptModule {
         args.extend_from_slice(&refs);
         run_cmd("npm", &args)?;
 
+        Ok(())
+    }
+
+    fn post_setup(
+        &self,
+        _dep: &Dependency,
+        _pm: &dyn PackageManager,
+        project_root: &Path,
+    ) -> Result<()> {
+        if !project_root.join("package.json").exists() {
+            return Ok(());
+        }
+        let (pm_cmd, lockfile) = detect_node_pm(project_root);
+        let package_json = project_root.join("package.json");
+        let manifest: &Path = lockfile.as_deref().unwrap_or(&package_json);
+        let stamp_path = project_root.join(".devy_ts_local_stamp");
+        if stamp_matches(&stamp_path, manifest) {
+            output::skip("Node dependencies up to date");
+            return Ok(());
+        }
+        output::step(&format!("Running {pm_cmd} install"));
+        let status = Command::new(pm_cmd)
+            .arg("install")
+            .current_dir(project_root)
+            .status()
+            .with_context(|| format!("Failed to run `{pm_cmd} install`"))?;
+        if !status.success() {
+            anyhow::bail!("`{pm_cmd} install` failed — check the output above for details");
+        }
+        write_stamp(&stamp_path, manifest);
+        output::success(&format!("{pm_cmd} install complete"));
         Ok(())
     }
 }
@@ -71,6 +107,45 @@ mod tests {
         };
         let dep = Dependency::simple("typescript");
         assert!(TypeScriptModule.install(&pm, &dep).is_err());
+    }
+
+    fn file_mtime_secs(path: &std::path::Path) -> u64 {
+        std::fs::metadata(path)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    #[test]
+    fn typescript_post_setup_no_package_json_is_noop() {
+        let dir = crate::test_support::tmp_dir();
+        let pm = MockPackageManager::default();
+        assert!(
+            TypeScriptModule
+                .post_setup(&Dependency::simple("typescript"), &pm, &dir)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn typescript_post_setup_skips_install_when_stamp_matches() {
+        let dir = crate::test_support::tmp_dir();
+        let pkg_json = dir.join("package.json");
+        std::fs::write(&pkg_json, r#"{"name":"test"}"#).unwrap();
+        std::fs::write(
+            dir.join(".devy_ts_local_stamp"),
+            file_mtime_secs(&pkg_json).to_string(),
+        )
+        .unwrap();
+        let pm = MockPackageManager::default();
+        assert!(
+            TypeScriptModule
+                .post_setup(&Dependency::simple("typescript"), &pm, &dir)
+                .is_ok()
+        );
     }
 
     #[test]

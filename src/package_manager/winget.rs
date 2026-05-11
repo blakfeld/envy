@@ -46,7 +46,10 @@ impl WinGet {
             .status()
             .with_context(|| format!("Failed to run: winget {}", args.join(" ")))?;
         if !status.success() {
-            bail!("winget {} exited with non-zero status", args.join(" "));
+            bail!(
+                "`winget {}` failed — check the output above for details",
+                args.join(" ")
+            );
         }
         Ok(())
     }
@@ -109,7 +112,7 @@ impl PackageManager for WinGet {
             .status()
             .with_context(|| format!("Failed to start Windows service: {name}"))?;
         if !status.success() {
-            bail!("net start {name} failed");
+            bail!("`net start {name}` failed — check the output above for details");
         }
         Ok(())
     }
@@ -123,7 +126,7 @@ impl PackageManager for WinGet {
             .status()
             .with_context(|| format!("Failed to stop Windows service: {name}"))?;
         if !status.success() {
-            bail!("net stop {name} failed");
+            bail!("`net stop {name}` failed — check the output above for details");
         }
         Ok(())
     }
