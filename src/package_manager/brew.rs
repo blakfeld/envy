@@ -33,14 +33,22 @@ fn parse_brew_version(line: &str) -> Option<String> {
 
 /// Returns the Homebrew formula name for a dependency.
 ///
-/// Homebrew supports `name@major` formula selectors (e.g. `node@20`). Lock-injected
-/// resolved versions contain a dot (e.g. "20.11.0") and are NOT valid formula names —
-/// those are informational and should not change the formula used for install/list queries.
+/// Homebrew supports `name@major` (e.g. `node@20`) and `name@major.minor` (e.g. `python@3.14`)
+/// formula selectors. Lock-injected resolved versions have 3+ components or a build suffix
+/// (e.g. "20.11.0", "3.14.4_1") and are NOT valid formula names.
 fn brew_formula_name(dep: &Dependency) -> String {
     match &dep.version {
-        Some(v) if !v.contains('.') => format!("{}@{}", dep.name, v),
+        Some(v) if is_formula_pin(v) => format!("{}@{}", dep.name, v),
         _ => dep.name.clone(),
     }
+}
+
+/// Returns true when `v` looks like a user-specified version pin rather than a resolved version.
+/// Formula pins have at most 2 dot-separated components and no build suffix (`_N`).
+/// "20" → true, "3.14" → true, "8.0" → true
+/// "20.11.0" → false (3 parts), "3.14.4_1" → false (underscore), "3.14.4" → false (3 parts)
+fn is_formula_pin(v: &str) -> bool {
+    !v.contains('_') && v.split('.').count() <= 2
 }
 
 impl Homebrew {
@@ -430,6 +438,55 @@ mod tests {
         let mut dep = Dependency::simple("node");
         dep.version = Some("20.11.0".into());
         assert_eq!(brew_formula_name(&dep), "node");
+    }
+
+    #[test]
+    fn brew_formula_name_with_major_minor_pin_appends_version() {
+        // "3.14" is a valid brew major.minor pin (e.g. python@3.14).
+        let mut dep = Dependency::simple("python");
+        dep.version = Some("3.14".into());
+        assert_eq!(brew_formula_name(&dep), "python@3.14");
+    }
+
+    #[test]
+    fn brew_formula_name_with_python_lock_version_returns_base_name() {
+        // Lock-injected version "3.14.4_1" must NOT become "python@3.14.4_1".
+        let mut dep = Dependency::simple("python");
+        dep.version = Some("3.14.4_1".into());
+        assert_eq!(brew_formula_name(&dep), "python");
+    }
+
+    #[test]
+    fn brew_formula_name_with_three_part_version_returns_base_name() {
+        let mut dep = Dependency::simple("python");
+        dep.version = Some("3.14.4".into());
+        assert_eq!(brew_formula_name(&dep), "python");
+    }
+
+    // ── is_formula_pin ────────────────────────────────────────────────────────
+
+    #[test]
+    fn is_formula_pin_major_only() {
+        assert!(is_formula_pin("20"));
+        assert!(is_formula_pin("3"));
+    }
+
+    #[test]
+    fn is_formula_pin_major_minor() {
+        assert!(is_formula_pin("3.14"));
+        assert!(is_formula_pin("8.0"));
+    }
+
+    #[test]
+    fn is_formula_pin_rejects_three_parts() {
+        assert!(!is_formula_pin("3.14.4"));
+        assert!(!is_formula_pin("20.11.0"));
+    }
+
+    #[test]
+    fn is_formula_pin_rejects_build_suffix() {
+        assert!(!is_formula_pin("3.14.4_1"));
+        assert!(!is_formula_pin("8.0.36_1"));
     }
 
     // ── parse_brew_version ────────────────────────────────────────────────────

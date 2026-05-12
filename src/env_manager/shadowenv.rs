@@ -59,7 +59,7 @@ impl Shadowenv {
 
     fn trust(&self, dir: &Path) -> Result<()> {
         let status = Command::new("shadowenv")
-            .args(["trust", "."])
+            .args(["trust"])
             .current_dir(dir)
             .status()
             .context("Failed to run shadowenv trust")?;
