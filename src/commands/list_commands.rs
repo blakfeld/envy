@@ -29,8 +29,8 @@ mod tests {
             dependencies: vec![],
             environment: HashMap::new(),
             commands,
-
             hooks: Default::default(),
+            package_manager: Default::default(),
         }
     }
 

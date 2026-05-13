@@ -18,6 +18,7 @@ pub struct PostgresModule;
 fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "winget" => "PostgreSQL.PostgreSQL",
+        "nix" => "postgresql",
         _ => "postgresql",
     }
 }
@@ -90,6 +91,14 @@ impl Module for PostgresModule {
 
     fn service_name<'a>(&self, _dep: &'a Dependency) -> Cow<'a, str> {
         Cow::Borrowed("postgresql")
+    }
+
+    fn service_exec_name(&self) -> Option<&'static str> {
+        Some("postgres")
+    }
+
+    fn nix_attr(&self, _dep: &crate::config::Dependency) -> Option<String> {
+        Some("postgresql".to_string())
     }
 
     fn is_running(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
@@ -192,9 +201,9 @@ mod tests {
 
     #[test]
     fn postgres_health_check_fails_on_unused_port() {
-        let dep = dep_with_port(19997);
+        let dep = dep_with_port(19984);
         let err = PostgresModule.health_check(&dep).unwrap_err();
-        assert!(err.to_string().contains("19997"));
+        assert!(err.to_string().contains("19984"));
     }
 
     #[test]

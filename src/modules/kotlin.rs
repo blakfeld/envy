@@ -14,11 +14,16 @@ pub struct KotlinModule;
 fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "winget" => "JetBrains.Kotlin",
+        "nix" => "kotlin",
         _ => "kotlin",
     }
 }
 
 impl Module for KotlinModule {
+    fn nix_attr(&self, _dep: &Dependency) -> Option<String> {
+        Some("kotlin".to_string())
+    }
+
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
         pm.is_package_installed(&pm_dep(dep, package_name(pm)))
     }

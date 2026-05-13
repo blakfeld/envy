@@ -8,7 +8,7 @@ use crate::package_manager::{self, PackageManager};
 
 #[cfg_attr(test, mutants::skip)] // thin I/O wrapper — requires a real devy.yml and package manager
 pub fn run() -> Result<()> {
-    let config = DevyConfig::load_default()?;
+    let (config, project_root) = DevyConfig::load_with_root()?;
 
     let project_name = config.name.as_deref().unwrap_or("project");
     output::header(&format!("devy down · {}", project_name));
@@ -18,7 +18,7 @@ pub fn run() -> Result<()> {
         run_hook("before_down", hook)?;
     }
 
-    let pm = package_manager::detect()?;
+    let pm = package_manager::detect(config.package_manager, &project_root)?;
     down_impl(&config, pm.as_ref())?;
 
     if let Some(ref hook) = config.hooks.after_down {
@@ -26,7 +26,7 @@ pub fn run() -> Result<()> {
         run_hook("after_down", hook)?;
     }
 
-    println!();
+    output::blank_line();
     Ok(())
 }
 
@@ -86,7 +86,6 @@ mod tests {
 
     #[test]
     fn down_impl_stops_running_service() {
-        // Kills `delete ! in run` — mutation would skip stop when service IS running.
         let config = make_config(&["mysql"]);
         let pm = MockPackageManager {
             service_running: true,
@@ -101,7 +100,6 @@ mod tests {
 
     #[test]
     fn down_impl_propagates_stop_error() {
-        // Kills `replace run -> Ok(())` — mutation always returns Ok.
         let config = make_config(&["mysql"]);
         let pm = MockPackageManager {
             service_running: true,

@@ -15,6 +15,7 @@ pub(super) struct PackageModule {
     pub(super) default: &'static str,
     pub(super) apt: &'static str,
     pub(super) winget: &'static str,
+    pub(super) nix: &'static str,
 }
 
 impl PackageModule {
@@ -22,6 +23,7 @@ impl PackageModule {
         match pm.name() {
             "apt" => self.apt,
             "winget" => self.winget,
+            "nix" => self.nix,
             _ => self.default,
         }
     }
@@ -34,6 +36,10 @@ impl Module for PackageModule {
 
     fn install(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<()> {
         pm.install_package(&pm_dep(dep, self.name_for(pm)))
+    }
+
+    fn nix_attr(&self, _dep: &Dependency) -> Option<String> {
+        Some(self.nix.to_string())
     }
 }
 
@@ -192,6 +198,7 @@ pub(super) fn node_pkg(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "apt" => "nodejs",
         "winget" => "OpenJS.NodeJS",
+        "nix" => "nodejs",
         _ => "node",
     }
 }

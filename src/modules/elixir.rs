@@ -14,11 +14,16 @@ pub struct ElixirModule;
 fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "winget" => "Erlang-Solutions.Elixir",
+        "nix" => "elixir",
         _ => "elixir",
     }
 }
 
 impl Module for ElixirModule {
+    fn nix_attr(&self, _dep: &Dependency) -> Option<String> {
+        Some("elixir".to_string())
+    }
+
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
         pm.is_package_installed(&pm_dep(dep, package_name(pm)))
     }

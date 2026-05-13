@@ -78,7 +78,7 @@ pub(crate) fn check_impl(
         }
     }
 
-    println!();
+    output::blank_line();
     if issues == 0 {
         output::success("all checks passed");
         Ok(())
@@ -96,15 +96,8 @@ fn issue_noun(count: usize) -> &'static str {
 
 #[cfg_attr(test, mutants::skip)] // thin I/O wrapper
 pub fn run() -> Result<()> {
-    let start = std::env::current_dir().context("Failed to get current directory")?;
-    let config_path = DevyConfig::find_config(&start)
-        .ok_or_else(|| anyhow::anyhow!("devy.yml not found — are you inside a devy project?"))?;
-    let project_root = config_path
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("devy.yml has no parent directory"))?
-        .to_path_buf();
-    let config = DevyConfig::load(&config_path)?;
-    let pm = package_manager::detect()?;
+    let (config, project_root) = DevyConfig::load_with_root()?;
+    let pm = package_manager::detect(config.package_manager, &project_root)?;
     let env_mgr = Shadowenv;
     check_impl(&config, pm.as_ref(), &env_mgr, &project_root)
 }
@@ -124,6 +117,7 @@ mod tests {
     #[test]
     fn check_impl_returns_ok_when_all_installed() {
         let config = make_config(&["node"], HashMap::new());
+
         let pm = MockPackageManager {
             installed: true,
             ..Default::default()
@@ -133,7 +127,6 @@ mod tests {
 
     #[test]
     fn check_impl_returns_err_when_dep_not_installed() {
-        // Kills `replace run -> Ok(())` — with that mutation the result would always be Ok.
         let config = make_config(&["node"], HashMap::new());
         let pm = MockPackageManager::default(); // installed=false
         assert!(check_impl(&config, &pm, &MockEnvManager::default(), Path::new(".")).is_err());
@@ -141,7 +134,6 @@ mod tests {
 
     #[test]
     fn check_impl_counts_two_missing_deps_as_issues() {
-        // Kills `replace += with -=` mutations in issue counting.
         let config = make_config(&["node", "python"], HashMap::new());
         let pm = MockPackageManager::default();
         let result = check_impl(&config, &pm, &MockEnvManager::default(), Path::new("."));
@@ -150,8 +142,6 @@ mod tests {
 
     #[test]
     fn check_impl_empty_deps_skips_dep_table() {
-        // Kills `delete ! in run at line 21` — with mutation, empty deps would print the table.
-        // No panic/error expected when deps list is empty.
         let config = make_config(&[], HashMap::new());
         let pm = MockPackageManager::default();
         assert!(check_impl(&config, &pm, &MockEnvManager::default(), Path::new(".")).is_ok());
@@ -159,8 +149,6 @@ mod tests {
 
     #[test]
     fn check_impl_single_issue_uses_singular_noun() {
-        // Kills `replace == with != at line 36` for issues == 1.
-        // (Verified via the side-effect path, but any deterministic Err is sufficient.)
         let config = make_config(&["node"], HashMap::new());
         let pm = MockPackageManager::default();
         assert!(check_impl(&config, &pm, &MockEnvManager::default(), Path::new(".")).is_err());
@@ -168,7 +156,6 @@ mod tests {
 
     #[test]
     fn check_impl_zero_issues_returns_ok() {
-        // Kills `replace == with != at line 32` — with mutation, zero issues would return Err.
         let config = make_config(&["node"], HashMap::new());
         let pm = MockPackageManager {
             installed: true,
@@ -179,8 +166,6 @@ mod tests {
 
     #[test]
     fn check_impl_not_installed_service_counts_as_issue() {
-        // When a service module is not installed, issues += 1.
-        // Kills `delete ! in run at line 26` — mutation would count INSTALLED services as issues.
         let config = make_config(&["mysql"], HashMap::new()); // mysql is a service
         let pm = MockPackageManager::default(); // installed=false
         let result = check_impl(&config, &pm, &MockEnvManager::default(), Path::new("."));
@@ -192,9 +177,6 @@ mod tests {
 
     #[test]
     fn check_impl_env_issue_without_dep_issues_returns_err() {
-        // Kills `replace += with *=` at line 28 (env issues counter).
-        // With *=: issues = 0 (no dep issues) * env_count = 0 → Ok, but should be Err.
-        // Also kills `replace += with -=` potential equivalence by testing cumulative count.
         let mut env = HashMap::new();
         env.insert("MY_VAR".to_string(), "value".to_string());
         // Empty deps so the dep block contributes 0 to issues.
@@ -210,9 +192,6 @@ mod tests {
 
     #[test]
     fn check_impl_dep_and_env_issues_both_contribute() {
-        // Kills `replace += with -=` at lines 23 and 28 in combination:
-        // any non-zero issues count (even usize::MAX) still returns Err, so we verify
-        // the function is also Err when both sources independently contribute.
         let mut env = HashMap::new();
         env.insert("MY_VAR".to_string(), "val".to_string());
         let config = make_config(&["node"], env);
@@ -309,6 +288,7 @@ mod tests {
             environment: HashMap::new(),
             commands: HashMap::new(),
             hooks: Default::default(),
+            package_manager: Default::default(),
         };
         let pm = MockPackageManager {
             installed: true,

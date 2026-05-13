@@ -47,16 +47,9 @@ pub(crate) fn check_port_conflicts(deps: &[Dependency]) -> Result<()> {
 }
 
 #[cfg_attr(test, mutants::skip)] // thin delegation — reads process env and disk; not unit-testable
-pub fn run(update: bool) -> Result<()> {
-    let start = std::env::current_dir().context("Failed to get current directory")?;
-    let config_path = DevyConfig::find_config(&start)
-        .ok_or_else(|| anyhow::anyhow!("devy.yml not found — are you inside a devy project?"))?;
-    let project_root = config_path
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("devy.yml has no parent directory"))?
-        .to_path_buf();
-    let config = DevyConfig::load(&config_path)?;
-    let pm = package_manager::detect()?;
+pub fn run(update: bool, bootstrap: bool) -> Result<()> {
+    let (config, project_root) = DevyConfig::load_with_root()?;
+    let pm = package_manager::detect(config.package_manager, &project_root)?;
 
     // Acquire an exclusive advisory lock so concurrent `devy up` invocations
     // (e.g. two devs on the same machine, parallel CI jobs) queue rather than race.
@@ -77,18 +70,23 @@ pub fn run(update: bool) -> Result<()> {
         &config,
         pm.as_ref(),
         &Shadowenv,
-        update,
+        UpOptions { update, bootstrap },
         &project_root,
         &project_root.join(crate::lock::PATH),
     )
     // _guard dropped here → lock released
 }
 
+pub(crate) struct UpOptions {
+    pub update: bool,
+    pub bootstrap: bool,
+}
+
 pub(crate) fn up_impl(
     config: &DevyConfig,
     pm: &dyn package_manager::PackageManager,
     env_mgr: &dyn EnvManager,
-    update: bool,
+    opts: UpOptions,
     project_root: &Path,
     lock_path: &Path,
 ) -> Result<()> {
@@ -101,15 +99,15 @@ pub(crate) fn up_impl(
     }
 
     output::step(&format!("Checking for {}", pm.name()));
-    pm.ensure_available()
-        .with_context(|| format!("Failed to bootstrap {}", pm.name()))?;
+    pm.ensure_available(opts.bootstrap)
+        .with_context(|| format!("Failed to ensure {} is available", pm.name()))?;
     output::success(&format!("{} available", pm.name()));
 
     // Load the existing lock for orphan comparison regardless of --update.
     let existing_lock = LockFile::load(lock_path).context("Failed to read devy.lock")?;
 
     // For version pinning, ignore the lock when --update is passed.
-    let lock = if update {
+    let lock = if opts.update {
         if lock_path.exists() {
             output::step("Ignoring devy.lock (--update)");
         }
@@ -135,7 +133,9 @@ pub(crate) fn up_impl(
     // Collect module-suggested env vars and PATH prepends after each dep installs.
     // This ensures failed installs don't pollute the environment config.
     let mut module_env: HashMap<String, String> = HashMap::new();
-    let mut module_path_prepends: Vec<String> = Vec::new();
+    // PM-level prepends (e.g. .devy/nix-profile/bin) go first so project-local
+    // binaries shadow any system copies of the same tools.
+    let mut module_path_prepends: Vec<String> = pm.path_prepends(project_root);
 
     // Phase 1: install all binaries (no services started yet).
     if !effective_deps.is_empty() {
@@ -230,7 +230,7 @@ pub(crate) fn up_impl(
         run_hook("after_up", hook)?;
     }
 
-    println!();
+    output::blank_line();
     output::success(&format!("{} is ready", project_name));
 
     Ok(())
@@ -264,7 +264,11 @@ pub(crate) fn install_binary(
     let display = dep.versioned_name();
 
     if module.is_installed(pm, dep)? {
-        output::skip(&format!("{} already installed", display));
+        output::skip(&format!(
+            "{} already installed (via {})",
+            display,
+            pm.name()
+        ));
     } else {
         output::step(&format!("Installing {}", display));
         module
@@ -505,7 +509,6 @@ mod tests {
 
     #[test]
     fn apply_lock_pins_version_from_lock_file() {
-        // Kills `delete field version from struct Dependency expression in apply_lock`.
         let dep = Dependency::simple("node");
         let mut deps = BTreeMap::new();
         deps.insert(
@@ -566,7 +569,6 @@ mod tests {
 
     #[test]
     fn install_binary_propagates_install_error() {
-        // Kills `replace install_binary -> Ok(())` — mutation always returns Ok.
         let pm = MockPackageManager {
             install_fails: true,
             ..Default::default()
@@ -699,7 +701,6 @@ mod tests {
 
     #[test]
     fn write_lock_creates_file() {
-        // Kills `replace write_lock -> Ok(())` — mutation returns Ok without writing.
         let path = tmp_path();
         let pm = MockPackageManager::default();
         let deps = vec![Dependency::simple("node")];
@@ -780,20 +781,10 @@ mod tests {
 
     // ── up_impl ───────────────────────────────────────────────────────────────
 
-    use crate::config::{DevyConfig, RawDependency};
     use crate::env_manager::MockEnvManager;
 
-    fn make_config(dep_names: &[&str], env: HashMap<String, String>) -> DevyConfig {
-        DevyConfig {
-            name: Some("test".into()),
-            dependencies: dep_names
-                .iter()
-                .map(|n| RawDependency::Simple(n.to_string()))
-                .collect(),
-            environment: env,
-            commands: HashMap::new(),
-            hooks: Default::default(),
-        }
+    fn make_config(dep_names: &[&str], env: HashMap<String, String>) -> crate::config::DevyConfig {
+        crate::test_support::make_config(dep_names, env)
     }
 
     #[test]
@@ -806,7 +797,17 @@ mod tests {
         let env_mgr = MockEnvManager::default();
         let dir = crate::test_support::tmp_dir();
         let lock = tmp_path();
-        let result = up_impl(&config, &pm, &env_mgr, false, &dir, &lock);
+        let result = up_impl(
+            &config,
+            &pm,
+            &env_mgr,
+            UpOptions {
+                update: false,
+                bootstrap: false,
+            },
+            &dir,
+            &lock,
+        );
         assert!(result.is_ok(), "up_impl must succeed with empty config");
     }
 
@@ -820,7 +821,18 @@ mod tests {
         let env_mgr = MockEnvManager::default();
         let dir = crate::test_support::tmp_dir();
         let lock = tmp_path();
-        up_impl(&config, &pm, &env_mgr, false, &dir, &lock).unwrap();
+        up_impl(
+            &config,
+            &pm,
+            &env_mgr,
+            UpOptions {
+                update: false,
+                bootstrap: false,
+            },
+            &dir,
+            &lock,
+        )
+        .unwrap();
         assert!(lock.exists(), "up_impl must write the lock file");
     }
 
@@ -832,7 +844,17 @@ mod tests {
         let env_mgr = MockEnvManager::default();
         let dir = crate::test_support::tmp_dir();
         let lock = tmp_path();
-        let result = up_impl(&config, &pm, &env_mgr, false, &dir, &lock);
+        let result = up_impl(
+            &config,
+            &pm,
+            &env_mgr,
+            UpOptions {
+                update: false,
+                bootstrap: false,
+            },
+            &dir,
+            &lock,
+        );
         assert!(result.is_err(), "port conflict must propagate as Err");
     }
 
@@ -847,10 +869,54 @@ mod tests {
         let env_mgr = MockEnvManager::default();
         let dir = crate::test_support::tmp_dir();
         let lock = tmp_path();
-        up_impl(&config, &pm, &env_mgr, false, &dir, &lock).unwrap();
+        up_impl(
+            &config,
+            &pm,
+            &env_mgr,
+            UpOptions {
+                update: false,
+                bootstrap: false,
+            },
+            &dir,
+            &lock,
+        )
+        .unwrap();
         assert!(
             !env_mgr.setup_called.get(),
             "env_mgr.setup must not be called when there is nothing to configure"
+        );
+    }
+
+    #[test]
+    fn up_impl_calls_env_mgr_setup_when_pm_provides_path_prepends() {
+        // PM-level path prepends (e.g. Nix profile bin) must be treated the same as
+        // module-level path prepends: they constitute content and trigger env_mgr.setup.
+        let config = make_config(&[], HashMap::new());
+        let pm = MockPackageManager {
+            path_prepends_result: vec!["/project/.devy/nix-profile/bin".into()],
+            ..Default::default()
+        };
+        let env_mgr = MockEnvManager {
+            is_available: true,
+            ..Default::default()
+        };
+        let dir = crate::test_support::tmp_dir();
+        let lock = tmp_path();
+        up_impl(
+            &config,
+            &pm,
+            &env_mgr,
+            UpOptions {
+                update: false,
+                bootstrap: false,
+            },
+            &dir,
+            &lock,
+        )
+        .unwrap();
+        assert!(
+            env_mgr.setup_called.get(),
+            "env_mgr.setup must be called when PM provides path prepends"
         );
     }
 
@@ -869,7 +935,18 @@ mod tests {
         };
         let dir = crate::test_support::tmp_dir();
         let lock = tmp_path();
-        up_impl(&config, &pm, &env_mgr, false, &dir, &lock).unwrap();
+        up_impl(
+            &config,
+            &pm,
+            &env_mgr,
+            UpOptions {
+                update: false,
+                bootstrap: false,
+            },
+            &dir,
+            &lock,
+        )
+        .unwrap();
         assert!(
             env_mgr.setup_called.get(),
             "env_mgr.setup must be called when env vars are present"
@@ -889,7 +966,18 @@ mod tests {
         };
         let dir = crate::test_support::tmp_dir();
         let lock = tmp_path();
-        up_impl(&config, &pm, &env_mgr, false, &dir, &lock).unwrap();
+        up_impl(
+            &config,
+            &pm,
+            &env_mgr,
+            UpOptions {
+                update: false,
+                bootstrap: false,
+            },
+            &dir,
+            &lock,
+        )
+        .unwrap();
         assert!(
             pm.installed_packages
                 .borrow()
@@ -931,7 +1019,18 @@ mod tests {
         let env_mgr = MockEnvManager::default();
 
         let warn_count = crate::output::with_warn_capture(|| {
-            up_impl(&config, &pm, &env_mgr, true, &dir, &lock).unwrap();
+            up_impl(
+                &config,
+                &pm,
+                &env_mgr,
+                UpOptions {
+                    update: true,
+                    bootstrap: false,
+                },
+                &dir,
+                &lock,
+            )
+            .unwrap();
         });
         // The orphan message is emitted via output::info, not output::warn, so we check
         // that the run succeeded and the lock is rewritten without redis.
@@ -977,7 +1076,18 @@ mod tests {
 
         // If orphan detection is broken, "node" shows as orphaned even though "js" == "node".
         // The lock should be rewritten with "node" (canonical) still present.
-        up_impl(&config, &pm, &env_mgr, false, &dir, &lock).unwrap();
+        up_impl(
+            &config,
+            &pm,
+            &env_mgr,
+            UpOptions {
+                update: false,
+                bootstrap: false,
+            },
+            &dir,
+            &lock,
+        )
+        .unwrap();
         let rewritten = LockFile::load(&lock).unwrap().unwrap();
         assert!(
             rewritten.dependencies.contains_key("node"),
@@ -995,7 +1105,17 @@ mod tests {
         let env_mgr = MockEnvManager::default();
         let dir = crate::test_support::tmp_dir();
         let lock = tmp_path();
-        let result = up_impl(&config, &pm, &env_mgr, false, &dir, &lock);
+        let result = up_impl(
+            &config,
+            &pm,
+            &env_mgr,
+            UpOptions {
+                update: false,
+                bootstrap: false,
+            },
+            &dir,
+            &lock,
+        );
         assert!(
             result.is_err(),
             "validate_config failure must propagate as Err"
@@ -1012,7 +1132,17 @@ mod tests {
         let env_mgr = MockEnvManager::default();
         let dir = crate::test_support::tmp_dir();
         let lock = tmp_path();
-        let result = up_impl(&config, &pm, &env_mgr, false, &dir, &lock);
+        let result = up_impl(
+            &config,
+            &pm,
+            &env_mgr,
+            UpOptions {
+                update: false,
+                bootstrap: false,
+            },
+            &dir,
+            &lock,
+        );
         assert!(result.is_err(), "install failure must propagate as Err");
     }
 
@@ -1031,7 +1161,18 @@ mod tests {
         };
         let dir = crate::test_support::tmp_dir();
         let lock = tmp_path();
-        up_impl(&config, &pm, &env_mgr, false, &dir, &lock).unwrap();
+        up_impl(
+            &config,
+            &pm,
+            &env_mgr,
+            UpOptions {
+                update: false,
+                bootstrap: false,
+            },
+            &dir,
+            &lock,
+        )
+        .unwrap();
         assert!(
             env_mgr.setup_called.get(),
             "env_mgr.setup must be called to clear the stale shadowenv file"
@@ -1049,7 +1190,18 @@ mod tests {
         let env_mgr = MockEnvManager::default(); // read_vars_returns_some=false
         let dir = crate::test_support::tmp_dir();
         let lock = tmp_path();
-        up_impl(&config, &pm, &env_mgr, false, &dir, &lock).unwrap();
+        up_impl(
+            &config,
+            &pm,
+            &env_mgr,
+            UpOptions {
+                update: false,
+                bootstrap: false,
+            },
+            &dir,
+            &lock,
+        )
+        .unwrap();
         assert!(
             !env_mgr.setup_called.get(),
             "env_mgr.setup must not be called when there is no content and no existing file"
@@ -1070,7 +1222,17 @@ mod tests {
         let env_mgr = MockEnvManager::default();
         let dir = crate::test_support::tmp_dir();
         let lock = tmp_path();
-        let result = up_impl(&config, &pm, &env_mgr, false, &dir, &lock);
+        let result = up_impl(
+            &config,
+            &pm,
+            &env_mgr,
+            UpOptions {
+                update: false,
+                bootstrap: false,
+            },
+            &dir,
+            &lock,
+        );
         assert!(
             result.is_err(),
             "service start failure must propagate as Err"

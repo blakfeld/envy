@@ -3,9 +3,19 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 
-/// Single place that names the YAML extra-value type.
-/// Swap the right-hand side here if the YAML library ever changes.
 pub type ExtraValue = serde_yml::Value;
+
+/// Package manager selection from `devy.yml`.
+/// Serde rejects unknown values at parse time, catching typos early.
+#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PackageManagerChoice {
+    #[default]
+    Auto,
+    Nix,
+    Brew,
+    Apt,
+}
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
@@ -100,6 +110,10 @@ pub struct DevyConfig {
     pub commands: HashMap<String, RawCommand>,
     #[serde(default)]
     pub hooks: HooksConfig,
+    /// Optional package manager override. Omit or set to "auto" to let devy detect
+    /// the platform default. Unknown values are rejected at parse time.
+    #[serde(default)]
+    pub package_manager: PackageManagerChoice,
 }
 
 /// Supports two forms in YAML:
@@ -181,45 +195,46 @@ impl DevyConfig {
         Self::load(&path)
     }
 
+    /// Load config from the nearest `devy.yml` and return both the config and its
+    /// parent directory (the project root). Use this instead of the 7-line inline
+    /// pattern that was scattered across command modules.
+    pub fn load_with_root() -> Result<(Self, std::path::PathBuf)> {
+        let start = std::env::current_dir().context("Failed to get current directory")?;
+        let config_path = Self::find_config(&start).ok_or_else(|| {
+            anyhow::anyhow!("devy.yml not found — are you inside a devy project?")
+        })?;
+        let project_root = config_path
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("devy.yml has no parent directory"))?
+            .to_path_buf();
+        let config = Self::load(&config_path)?;
+        Ok((config, project_root))
+    }
+
     /// Walks from `start` up to the nearest `.git` root or `$HOME`,
     /// whichever comes first, looking for `devy.yml`.
     ///
     /// Stopping at the git root prevents a malicious or unrelated `devy.yml` planted
     /// in a parent directory from being picked up and having its hooks executed.
     pub(crate) fn find_config(start: &std::path::Path) -> Option<std::path::PathBuf> {
-        // HOME is kept raw (non-canonicalized) for comparison because it may not
-        // exist on disk (canonicalize would fail and fall back to the raw path anyway,
-        // but a canonicalized `dir` would never match a raw HOME). Using raw paths on
-        // both sides makes the guard reliable regardless of whether HOME exists.
-        let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
-        // `dir` is canonicalized for filesystem checks (.git, devy.yml existence).
-        // `dir_raw` mirrors the same traversal without canonicalization for the HOME guard.
+        let home = std::env::var("HOME")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .map(|h| h.canonicalize().unwrap_or(h));
         let mut dir = start.canonicalize().unwrap_or_else(|_| start.to_path_buf());
-        let mut dir_raw = start.to_path_buf();
         loop {
             let candidate = dir.join("devy.yml");
             if candidate.exists() {
                 return Some(candidate);
             }
-            // Stop at repository root: a .git here means we've already searched
-            // the entire current project without finding devy.yml.
             if dir.join(".git").exists() {
                 return None;
             }
-            // Never walk above $HOME to limit blast radius in non-git trees.
-            // Compare raw paths so the guard fires even when HOME doesn't exist on disk.
-            if home.as_deref() == Some(dir_raw.as_path()) {
+            if home.as_deref() == Some(dir.as_path()) {
                 return None;
             }
             match dir.parent() {
-                Some(parent) => {
-                    dir = parent.to_path_buf();
-                    // Advance dir_raw in lock-step with dir.
-                    dir_raw = dir_raw
-                        .parent()
-                        .map(|p| p.to_path_buf())
-                        .unwrap_or_else(|| dir_raw.clone());
-                }
+                Some(parent) => dir = parent.to_path_buf(),
                 None => return None,
             }
         }
@@ -401,6 +416,7 @@ mod tests {
             environment: HashMap::new(),
             commands: HashMap::new(),
             hooks: Default::default(),
+            package_manager: Default::default(),
         };
         assert!(
             config.normalized_dependencies().is_err(),
@@ -418,6 +434,7 @@ mod tests {
             environment: HashMap::new(),
             commands: HashMap::new(),
             hooks: Default::default(),
+            package_manager: Default::default(),
         };
         let deps = config.normalized_dependencies().unwrap();
         assert_eq!(deps.len(), 1);

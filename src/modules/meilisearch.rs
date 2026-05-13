@@ -13,6 +13,7 @@ pub struct MeilisearchModule;
 fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "winget" => "Meilisearch.Meilisearch",
+        "nix" => "meilisearch",
         _ => "meilisearch",
     }
 }
@@ -25,6 +26,15 @@ impl Module for MeilisearchModule {
     fn is_service(&self) -> bool {
         true
     }
+
+    fn service_exec_name(&self) -> Option<&'static str> {
+        Some("meilisearch")
+    }
+
+    fn nix_attr(&self, _dep: &crate::config::Dependency) -> Option<String> {
+        Some("meilisearch".to_string())
+    }
+
     fn default_port(&self) -> Option<u16> {
         Some(7700)
     }

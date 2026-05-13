@@ -13,6 +13,10 @@ use super::{Module, extra_strs, node_pkg, pm_dep, run_cmd};
 pub struct TypeScriptModule;
 
 impl Module for TypeScriptModule {
+    fn nix_attr(&self, _dep: &Dependency) -> Option<String> {
+        Some("nodejs".to_string())
+    }
+
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
         pm.is_package_installed(&pm_dep(dep, node_pkg(pm)))
     }

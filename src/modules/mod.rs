@@ -90,6 +90,20 @@ pub trait Module: Sync {
         Cow::Borrowed(&dep.name)
     }
 
+    /// The executable filename within the Nix profile bin directory for this service.
+    /// Used by the Nix backend to write launchd/systemd unit files.
+    /// Returns `None` if Nix-backed service management is not supported for this service.
+    fn service_exec_name(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// The nixpkgs attribute name for this module (e.g. `"redis"`, `"nodejs"`).
+    /// Used by `devy export` to generate correct `pkgs.<attr>` entries.
+    /// Returns `None` for modules with no known nixpkgs equivalent.
+    fn nix_attr(&self, _dep: &Dependency) -> Option<String> {
+        None
+    }
+
     fn is_running(&self, _pm: &dyn PackageManager, _dep: &Dependency) -> Result<bool> {
         Ok(false)
     }
@@ -268,51 +282,61 @@ static GO: PackageModule = PackageModule {
     default: "go",
     apt: "golang-go",
     winget: "GoLang.Go",
+    nix: "go",
 };
 static SCALA: PackageModule = PackageModule {
     default: "scala",
     apt: "scala",
     winget: "EPFL.Scala",
+    nix: "scala",
 };
 static PHP: PackageModule = PackageModule {
     default: "php",
     apt: "php",
     winget: "PHP.PHP",
+    nix: "php",
 };
 static AWSCLI: PackageModule = PackageModule {
     default: "awscli",
     apt: "awscli",
     winget: "Amazon.AWSCLI",
+    nix: "awscli2",
 };
 static GH: PackageModule = PackageModule {
     default: "gh",
     apt: "gh",
     winget: "GitHub.cli",
+    nix: "gh",
 };
 static KUBECTL: PackageModule = PackageModule {
     default: "kubectl",
     apt: "kubectl",
     winget: "Kubernetes.kubectl",
+    nix: "kubectl",
 };
 static HELM: PackageModule = PackageModule {
     default: "helm",
     apt: "helm",
     winget: "Helm.Helm",
+    nix: "kubernetes-helm",
 };
 static TERRAFORM: PackageModule = PackageModule {
     default: "terraform",
     apt: "terraform",
     winget: "Hashicorp.Terraform",
+    nix: "terraform",
 };
 static AZURE_CLI: PackageModule = PackageModule {
     default: "azure-cli",
     apt: "azure-cli",
     winget: "Microsoft.AzureCLI",
+    nix: "azure-cli",
 };
 static SWIFT: PackageModule = PackageModule {
     default: "swift",
     apt: "swift",
     winget: "Swift.Toolchain",
+    nix: "swift",
 };
 
 /// Canonical-name → module registry. One entry per canonical name.
@@ -1487,6 +1511,7 @@ mod tests {
             default: "go",
             apt: "golang-go",
             winget: "GoLang.Go",
+            nix: "go",
         };
         let pm = crate::package_manager::MockPackageManager {
             name: "apt",
@@ -1501,6 +1526,7 @@ mod tests {
             default: "go",
             apt: "golang-go",
             winget: "GoLang.Go",
+            nix: "go",
         };
         let pm = crate::package_manager::MockPackageManager {
             name: "winget",
@@ -1515,9 +1541,25 @@ mod tests {
             default: "go",
             apt: "golang-go",
             winget: "GoLang.Go",
+            nix: "go",
         };
         let pm = crate::package_manager::MockPackageManager {
             name: "brew",
+            ..Default::default()
+        };
+        assert_eq!(m.name_for(&pm), "go");
+    }
+
+    #[test]
+    fn package_module_name_for_nix() {
+        let m = PackageModule {
+            default: "go",
+            apt: "golang-go",
+            winget: "GoLang.Go",
+            nix: "go",
+        };
+        let pm = crate::package_manager::MockPackageManager {
+            name: "nix",
             ..Default::default()
         };
         assert_eq!(m.name_for(&pm), "go");
@@ -1529,6 +1571,7 @@ mod tests {
             default: "go",
             apt: "golang-go",
             winget: "GoLang.Go",
+            nix: "go",
         };
         let pm = crate::package_manager::MockPackageManager {
             installed: true,
@@ -1544,6 +1587,7 @@ mod tests {
             default: "go",
             apt: "golang-go",
             winget: "GoLang.Go",
+            nix: "go",
         };
         let pm = crate::package_manager::MockPackageManager::default();
         let dep = Dependency::simple("go");
@@ -1556,6 +1600,7 @@ mod tests {
             default: "go",
             apt: "golang-go",
             winget: "GoLang.Go",
+            nix: "go",
         };
         let pm = crate::package_manager::MockPackageManager {
             install_fails: true,

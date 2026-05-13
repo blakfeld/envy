@@ -24,6 +24,10 @@ impl Module for BunModule {
         Some("bun-installer")
     }
 
+    fn nix_attr(&self, _dep: &Dependency) -> Option<String> {
+        Some("bun".to_string())
+    }
+
     fn is_installed(&self, _pm: &dyn PackageManager, _dep: &Dependency) -> Result<bool> {
         let bin_exists = bun_bin()
             .map(|b| std::path::Path::new(&b).exists())

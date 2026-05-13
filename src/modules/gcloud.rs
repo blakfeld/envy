@@ -25,6 +25,10 @@ impl Module for GcloudModule {
         Some(&["components"])
     }
 
+    fn nix_attr(&self, _dep: &Dependency) -> Option<String> {
+        Some("google-cloud-sdk".to_string())
+    }
+
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
         match pm.name() {
             "brew" | "winget" => pm.is_package_installed(&pm_dep(dep, package_name(pm))),

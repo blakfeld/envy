@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use crate::config::DevyConfig;
 use crate::env_manager::{EnvManager, Shadowenv};
@@ -40,21 +40,14 @@ pub(crate) fn status_impl(
         }
     }
 
-    println!();
+    output::blank_line();
     Ok(())
 }
 
 #[cfg_attr(test, mutants::skip)] // thin I/O wrapper — requires a real devy.yml and package manager
 pub fn run() -> Result<()> {
-    let start = std::env::current_dir().context("Failed to get current directory")?;
-    let config_path = DevyConfig::find_config(&start)
-        .ok_or_else(|| anyhow::anyhow!("devy.yml not found — are you inside a devy project?"))?;
-    let project_root = config_path
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("devy.yml has no parent directory"))?
-        .to_path_buf();
-    let config = DevyConfig::load(&config_path)?;
-    let pm = package_manager::detect()?;
+    let (config, project_root) = DevyConfig::load_with_root()?;
+    let pm = package_manager::detect(config.package_manager, &project_root)?;
     let env_mgr = Shadowenv;
     status_impl(&config, pm.as_ref(), &env_mgr, &project_root)
 }

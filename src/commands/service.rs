@@ -9,8 +9,8 @@ use crate::package_manager::{self, PackageManager};
 /// Print all services from devy.yml with their current running status.
 #[cfg_attr(test, mutants::skip)] // thin I/O wrapper — requires a real devy.yml and package manager
 pub fn list() -> Result<()> {
-    let config = DevyConfig::load_default()?;
-    let pm = package_manager::detect()?;
+    let (config, project_root) = DevyConfig::load_with_root()?;
+    let pm = package_manager::detect(config.package_manager, &project_root)?;
     list_impl(&config, pm.as_ref())
 }
 
@@ -137,8 +137,8 @@ pub(crate) fn resolve_dep(config: &DevyConfig, name: &str) -> Result<Dependency>
 }
 
 fn resolve(name: &str) -> Result<(Dependency, Box<dyn PackageManager>)> {
-    let config = DevyConfig::load_default()?;
-    let pm = package_manager::detect()?;
+    let (config, project_root) = DevyConfig::load_with_root()?;
+    let pm = package_manager::detect(config.package_manager, &project_root)?;
     let dep = resolve_dep(&config, name)?;
     Ok((dep, pm))
 }
@@ -158,7 +158,6 @@ mod tests {
 
     #[test]
     fn resolve_dep_finds_correct_dep_by_name() {
-        // Kills `replace == with !=` — mutation finds the wrong dep.
         let config = make_config(&["mysql", "redis"]);
         let dep = resolve_dep(&config, "mysql").unwrap();
         assert_eq!(
@@ -176,7 +175,6 @@ mod tests {
     #[test]
     fn resolve_dep_returns_err_for_non_service() {
         // node is NOT a service — resolve_dep must reject it.
-        // Kills `delete ! in resolve` — mutation would bail for services, Ok for non-services.
         let config = make_config(&["node"]);
         assert!(
             resolve_dep(&config, "node").is_err(),
@@ -187,7 +185,6 @@ mod tests {
     #[test]
     fn resolve_dep_returns_ok_for_valid_service() {
         // mysql IS a service — resolve_dep must accept it.
-        // Kills `delete !` — mutation would bail here.
         let config = make_config(&["mysql"]);
         assert!(
             resolve_dep(&config, "mysql").is_ok(),
@@ -221,7 +218,6 @@ mod tests {
 
     #[test]
     fn stop_impl_stops_running_service() {
-        // Kills `delete ! in stop` — mutation would skip stop when service IS running.
         let pm = MockPackageManager {
             service_running: true,
             ..Default::default()
@@ -236,7 +232,6 @@ mod tests {
 
     #[test]
     fn stop_impl_propagates_stop_error() {
-        // Kills `replace stop -> Ok(())` — mutation always returns Ok.
         let pm = MockPackageManager {
             service_running: true,
             stop_service_fails: true,
@@ -267,9 +262,6 @@ mod tests {
 
     #[test]
     fn start_impl_propagates_start_error() {
-        // Kills `replace start -> Ok(())` — mutation always returns Ok.
-        // service_running: false so we attempt to start; start_service_fails so it fails.
-        // The ? propagates the error before wait_for_ready is called.
         let pm = MockPackageManager {
             service_running: false,
             start_service_fails: true,
@@ -314,8 +306,6 @@ mod tests {
 
     #[test]
     fn restart_impl_propagates_start_error() {
-        // Kills `replace restart -> Ok(())` — mutation always returns Ok.
-        // service is stopped; start_service fails → error propagated.
         let pm = MockPackageManager {
             service_running: false,
             start_service_fails: true,

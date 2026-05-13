@@ -15,11 +15,16 @@ pub struct DartModule;
 fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "winget" => "Dart.Dart",
+        "nix" => "dart",
         _ => "dart",
     }
 }
 
 impl Module for DartModule {
+    fn nix_attr(&self, _dep: &Dependency) -> Option<String> {
+        Some("dart".to_string())
+    }
+
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
         pm.is_package_installed(&pm_dep(dep, package_name(pm)))
     }

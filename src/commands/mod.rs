@@ -1,9 +1,11 @@
 pub mod check;
 pub mod down;
 pub mod exec;
+pub mod export;
 pub mod hook;
 pub mod init;
 pub mod list_commands;
+pub mod pr;
 pub mod service;
 pub mod shared;
 pub mod status;

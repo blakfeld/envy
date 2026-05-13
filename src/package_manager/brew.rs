@@ -52,20 +52,20 @@ fn is_formula_pin(v: &str) -> bool {
 }
 
 impl Homebrew {
-    fn brew_bin(&self) -> String {
+    fn brew_bin(&self) -> PathBuf {
         // Prefer the brew on PATH so brew_bin() and is_available() always agree.
         if let Ok(path) = which("brew") {
-            return path.to_string_lossy().into_owned();
+            return path;
         }
         if let Ok(prefix) = std::env::var("HOMEBREW_PREFIX")
             && !prefix.is_empty()
         {
-            return format!("{prefix}/bin/brew");
+            return PathBuf::from(prefix).join("bin").join("brew");
         }
         if cfg!(target_arch = "aarch64") {
-            "/opt/homebrew/bin/brew".to_string()
+            PathBuf::from("/opt/homebrew/bin/brew")
         } else {
-            "/usr/local/bin/brew".to_string()
+            PathBuf::from("/usr/local/bin/brew")
         }
     }
 
@@ -108,23 +108,15 @@ impl PackageManager for Homebrew {
         "brew"
     }
 
+    fn install_url(&self) -> &str {
+        "https://brew.sh"
+    }
+
     fn is_available(&self) -> bool {
         which("brew").is_ok()
     }
 
-    /// Installs Homebrew by fetching and executing the official install script.
-    /// This is the only supported installation method. The script is fetched over
-    /// HTTPS from raw.githubusercontent.com and executed via bash — no hash
-    /// verification is performed. Users in high-security environments should
-    /// install Homebrew manually before running `devy up`.
-    /// Set `DEVY_NO_BOOTSTRAP=1` to bail instead of running the installer.
     fn bootstrap(&self) -> Result<()> {
-        if std::env::var_os("DEVY_NO_BOOTSTRAP").is_some() {
-            bail!(
-                "Homebrew is not installed and DEVY_NO_BOOTSTRAP is set.\n\
-                 Install Homebrew manually: https://brew.sh"
-            );
-        }
         output::step("Bootstrapping Homebrew (fetching install script from GitHub via bash)");
         output::warn("No hash verification is performed. See https://brew.sh for manual install.");
         let status = Command::new("sh")
@@ -259,10 +251,11 @@ mod tests {
     #[test]
     fn brew_bin_returns_non_empty_path() {
         let b = Homebrew::default().brew_bin();
-        assert!(!b.is_empty(), "brew_bin must not be empty");
+        assert!(!b.as_os_str().is_empty(), "brew_bin must not be empty");
         assert!(
-            b.contains("brew"),
-            "Expected path to contain 'brew', got: {b}"
+            b.to_string_lossy().contains("brew"),
+            "Expected path to contain 'brew', got: {}",
+            b.display()
         );
     }
 
@@ -287,8 +280,7 @@ mod tests {
             }
         }
         assert_eq!(
-            result,
-            which_path.to_string_lossy(),
+            result, which_path,
             "brew_bin must return the PATH-resolved brew, not the HOMEBREW_PREFIX path"
         );
     }
@@ -313,7 +305,7 @@ mod tests {
                 None => std::env::remove_var("HOMEBREW_PREFIX"),
             }
         }
-        assert_eq!(result, "/custom/homebrew/bin/brew");
+        assert_eq!(result, PathBuf::from("/custom/homebrew/bin/brew"));
     }
 
     #[test]
@@ -331,8 +323,9 @@ mod tests {
                 None => std::env::remove_var("HOMEBREW_PREFIX"),
             }
         }
-        assert!(result.contains("homebrew") || result.contains("local"));
-        assert!(result.ends_with("/bin/brew"));
+        let s = result.to_string_lossy();
+        assert!(s.contains("homebrew") || s.contains("local"));
+        assert!(s.ends_with("/bin/brew"));
     }
 
     // ── name ──────────────────────────────────────────────────────────────────
@@ -391,22 +384,18 @@ mod tests {
     // ── bootstrap ────────────────────────────────────────────────────────────
 
     #[test]
-    fn bootstrap_returns_err_when_devy_no_bootstrap_set() {
-        let _guard = crate::test_support::ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        // SAFETY: serialised by ENV_LOCK; DEVY_NO_BOOTSTRAP is only read by bootstrap().
-        unsafe { std::env::set_var("DEVY_NO_BOOTSTRAP", "1") };
-        let result = Homebrew::default().bootstrap();
-        unsafe { std::env::remove_var("DEVY_NO_BOOTSTRAP") };
+    fn ensure_available_returns_err_without_bootstrap_flag() {
+        // Homebrew is not installed in CI; ensure_available(false) must return an error
+        // mentioning --bootstrap rather than running the installer.
+        // If Homebrew happens to be installed in the test environment, skip the assertion.
+        let pm = Homebrew::default();
+        if pm.is_available() {
+            return;
+        }
+        let err = pm.ensure_available(false).unwrap_err();
         assert!(
-            result.is_err(),
-            "bootstrap must bail when DEVY_NO_BOOTSTRAP is set"
-        );
-        let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("DEVY_NO_BOOTSTRAP"),
-            "error must mention DEVY_NO_BOOTSTRAP, got: {msg}"
+            err.to_string().contains("--bootstrap"),
+            "error must mention --bootstrap"
         );
     }
 

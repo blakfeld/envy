@@ -13,6 +13,7 @@ pub struct VaultModule;
 fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "winget" => "Hashicorp.Vault",
+        "nix" => "vault",
         _ => "vault",
     }
 }
@@ -32,6 +33,15 @@ impl Module for VaultModule {
     fn is_service(&self) -> bool {
         true
     }
+
+    fn service_exec_name(&self) -> Option<&'static str> {
+        Some("vault")
+    }
+
+    fn nix_attr(&self, _dep: &crate::config::Dependency) -> Option<String> {
+        Some("vault".to_string())
+    }
+
     fn default_port(&self) -> Option<u16> {
         Some(8200)
     }
