@@ -7,7 +7,7 @@ A declarative developer environment manager. Define your project's dependencies,
 
 ## What it does
 
-- **Installs dependencies** via the platform package manager (languages, databases, CLIs, etc.)
+- **Installs dependencies** via Nix by default — packages land in `.devy/nix-profile` inside your project, not your global environment
 - **Starts services** like MySQL and Redis, and waits for them to be healthy
 - **Sets environment variables** persistently in your shell session via [shadowenv](https://shopify.github.io/shadowenv/)
 - **Locks versions** in `devy.lock` so teammates get the same setup
@@ -15,15 +15,18 @@ A declarative developer environment manager. Define your project's dependencies,
 
 ## Platform support
 
-| Platform | Package manager | Service management |
+| Platform | Default package manager | Service management |
 |---|---|---|
-| macOS | [Homebrew](https://brew.sh) (auto-installed if missing) | `brew services` |
-| Ubuntu / Debian | apt (`sudo apt-get`) | `systemctl` |
+| macOS | [Nix](https://nixos.org) (project-local profile) | launchd (`launchctl`) |
+| Ubuntu / Debian | [Nix](https://nixos.org) (project-local profile) | systemd user units (`systemctl --user`) |
 | Windows 10/11 | [WinGet](https://learn.microsoft.com/en-us/windows/package-manager/winget/) | `net start` / `sc` |
+
+On macOS and Linux you can opt into your system package manager instead by setting `package_manager: brew` or `package_manager: apt` in `devy.yml`. See [Choosing a package manager](#choosing-a-package-manager).
 
 ## Requirements
 
 - A supported platform (see above)
+- **macOS / Linux:** Nix is required. Run `devy up --bootstrap` to install it automatically via the [Determinate Installer](https://install.determinate.systems), or install Nix manually first.
 
 ## Installation
 
@@ -57,13 +60,18 @@ devy init
 Then edit `devy.yml` to add your dependencies, and bring the environment up:
 
 ```sh
-devy up
+devy up --bootstrap   # installs Nix automatically if not already installed
+devy up               # if Nix is already installed
 ```
 
 ## devy.yml reference
 
 ```yaml
 name: my-project
+
+# Package manager to use. Defaults to "nix" on macOS and Linux, "winget" on Windows.
+# Options: nix, brew (macOS only), apt (Linux only)
+package_manager: nix
 
 dependencies:
   # Simple form — installs the latest version
@@ -73,10 +81,6 @@ dependencies:
   # Pinned version
   - node:
       version: "20"
-
-  # Custom Homebrew tap
-  - my-tool:
-      tap: myorg/homebrew-tools
 
   # MySQL with a custom port and extra server flags
   - mysql:
@@ -137,6 +141,19 @@ hooks:
   after_down: ~
 ```
 
+## Choosing a package manager
+
+devy defaults to Nix on macOS and Linux. Nix installs packages into a project-local profile at `.devy/nix-profile`, so nothing leaks into your global environment and each project is fully isolated.
+
+To use your system package manager instead, set `package_manager:` in `devy.yml`:
+
+```yaml
+package_manager: brew   # macOS only — uses Homebrew
+package_manager: apt    # Linux only — uses apt-get (requires sudo)
+```
+
+When `package_manager` is omitted or set to `auto`, devy prints a warning and falls back to Nix.
+
 ## Commands
 
 ### `devy up`
@@ -144,9 +161,10 @@ hooks:
 Installs dependencies, starts services, and configures the environment.
 
 ```sh
-devy up            # Set up the environment
-devy up --update   # Re-resolve all versions and rewrite devy.lock
-devy up --dry-run  # Check status without making any changes
+devy up               # Set up the environment
+devy up --bootstrap   # Auto-install Nix if it is not already installed
+devy up --update      # Re-resolve all versions and rewrite devy.lock
+devy up --dry-run     # Check status without making any changes
 ```
 
 ### `devy down`
@@ -195,6 +213,24 @@ devy init          # Fails if devy.yml already exists
 devy init --force  # Overwrite an existing devy.yml
 ```
 
+### `devy export`
+
+Exports the environment as a Nix file so you can use it with `nix-shell` or Nix flakes outside of devy.
+
+```sh
+devy export                    # Writes flake.nix (default)
+devy export --format=shell     # Writes shell.nix
+devy export --format=flake     # Writes flake.nix
+```
+
+### `devy pr`
+
+Opens a GitHub pull request for the current branch in your browser.
+
+```sh
+devy pr
+```
+
 ### `devy <command>`
 
 Runs a command defined under `commands:` in `devy.yml`.
@@ -231,11 +267,21 @@ Commit `devy.lock` to version control. Run `devy up --update` when you want to u
 
 | Name(s) | Default port | Notes |
 |---|---|---|
-| `mysql` | 3306 | Managed service; supports `port`, `cli_args`; writes `my.cnf` where supported |
+| `mysql` | 3306 | Managed service; supports `port`, `cli_args` |
 | `postgresql`, `postgres` | 5432 | Managed service; supports `port` |
 | `redis` | 6379 | Managed service; health-checks via PING |
-| `mongodb`, `mongo` | 27017 | Managed service; on Homebrew requires `tap: mongodb/brew` |
+| `mongodb`, `mongo` | 27017 | Managed service |
 | `nginx` | 80 | Managed service; supports `port` |
+| `mariadb` | 3306 | Managed service |
+| `rabbitmq` | — | Managed service |
+| `memcached` | — | Managed service |
+| `minio` | — | Managed service |
+| `vault` | — | Managed service |
+| `elasticsearch` | — | Managed service |
+| `kafka` | — | Managed service |
+| `meilisearch` | — | Managed service |
+| `mailhog` | — | Managed service |
+| `opensearch` | — | Managed service |
 
 ### Languages and runtimes
 
@@ -249,35 +295,46 @@ Commit `devy.lock` to version control. Run `devy up --update` when you want to u
 | `go`, `golang` | |
 | `java`, `openjdk` | |
 | `kotlin` | |
-| `scala` | |
-| `php` | |
 | `elixir` | |
+| `erlang` | |
+| `dart` | |
+| `crystal` | |
+| `zig` | |
+| `bun` | |
+| `deno` | |
+| `dotnet` | |
 | `swift` | |
 | anything else | Falls back to a generic package manager install |
 
-### Platform package name mapping
+### Package name mapping
 
-Each module knows the correct package name for each platform — you always use the same name in `devy.yml` regardless of OS:
+Each module knows the correct package name for each package manager — you always use the same name in `devy.yml` regardless of which backend is active:
 
-| Module | Homebrew | apt | WinGet |
-|---|---|---|---|
-| `mysql` | `mysql` | `mysql-server` | `Oracle.MySQL` |
-| `postgresql` | `postgresql` | `postgresql` | `PostgreSQL.PostgreSQL` |
-| `redis` | `redis` | `redis-server` | `Redis.Redis` |
-| `mongodb` | `mongodb-community` | `mongodb-org` | `MongoDB.Server` |
-| `nginx` | `nginx` | `nginx` | `Nginx.Nginx` |
-| `node` | `node` | `nodejs` | `OpenJS.NodeJS` |
-| `python` | `python` | `python3` | `Python.Python.3` |
-| `go` | `go` | `golang-go` | `GoLang.Go` |
-| `java` | `openjdk` | `default-jdk` | `Microsoft.OpenJDK.21` |
-| `kotlin` | `kotlin` | `kotlin` | `JetBrains.Kotlin` |
-| `ruby` | `ruby` | `ruby` | `RubyInstallerTeam.Ruby.3` |
+| Module | Nix (`nixpkgs`) | Homebrew | apt | WinGet |
+|---|---|---|---|---|
+| `mysql` | `mysql80` | `mysql` | `mysql-server` | `Oracle.MySQL` |
+| `postgresql` | `postgresql` | `postgresql` | `postgresql` | `PostgreSQL.PostgreSQL` |
+| `redis` | `redis` | `redis` | `redis-server` | `Redis.Redis` |
+| `mongodb` | `mongodb` | `mongodb-community` | `mongodb-org` | `MongoDB.Server` |
+| `nginx` | `nginx` | `nginx` | `nginx` | `Nginx.Nginx` |
+| `node` | `nodejs` | `node` | `nodejs` | `OpenJS.NodeJS` |
+| `python` | `python3` | `python` | `python3` | `Python.Python.3` |
+| `go` | `go` | `go` | `golang-go` | `GoLang.Go` |
+| `java` | `jdk` (version-matched) | `openjdk` | `default-jdk` | `Microsoft.OpenJDK.21` |
+| `kotlin` | `kotlin` | `kotlin` | `kotlin` | `JetBrains.Kotlin` |
+| `ruby` | `ruby` | `ruby` | `ruby` | `RubyInstallerTeam.Ruby.3` |
 
 ### Platform notes
 
-**Ubuntu/Debian:** Install operations use `sudo apt-get`. Version pinning with the `version:` field uses apt's exact-version syntax (`pkg=version`) — for most languages, omit the version field and rely on `devy.lock` to pin the installed version across machines.
+**macOS (Nix default):** Services are managed via launchd. devy writes a `LaunchAgent` plist to `~/Library/LaunchAgents/sh.devy.<name>.plist` and uses `launchctl` to start and stop them.
 
-**Windows:** Service management uses `net start`/`sc`. Custom MySQL/PostgreSQL config options (`port`, `cli_args`) are not applied on Windows.
+**Linux (Nix default):** Services are managed via systemd user units. devy writes a unit file to `~/.config/systemd/user/devy-<name>.service` and uses `systemctl --user` to start and stop them — no `sudo` required.
+
+**macOS (Homebrew):** Set `package_manager: brew` in `devy.yml`. Service management uses `brew services`.
+
+**Ubuntu/Debian (apt):** Set `package_manager: apt` in `devy.yml`. Install operations use `sudo apt-get`. Version pinning with the `version:` field uses apt's exact-version syntax (`pkg=version`) — for most languages, omit the version field and rely on `devy.lock` to pin the installed version across machines.
+
+**Windows:** Service management uses `net start`/`sc`. Custom MySQL/PostgreSQL config options (`port`, `cli_args`) are not applied on Windows. Nix is not supported on Windows.
 
 ## Security
 
@@ -295,17 +352,29 @@ dependencies:
 
 This is the same attack surface as `npm install` lifecycle scripts or `pip install` running `setup.py`.
 
-### Homebrew auto-install
+### Nix auto-install
 
-If Homebrew is not installed on macOS, devy will attempt to install it by fetching and executing the official install script from GitHub over HTTPS. No hash verification is performed.
-
-Set `DEVY_NO_BOOTSTRAP=1` to disable automatic Homebrew installation. devy will exit with an error and instructions to install Homebrew manually:
+If Nix is not installed on macOS or Linux, `devy up --bootstrap` will install it by fetching and executing the [Determinate Installer](https://install.determinate.systems) over HTTPS. Without `--bootstrap`, devy exits with an error and instructions to install Nix manually:
 
 ```sh
-DEVY_NO_BOOTSTRAP=1 devy up
+devy up --bootstrap   # allows automatic Nix installation
+devy up               # exits with an error if Nix is not installed
 ```
 
-This is recommended in CI environments where unexpected system-level changes should be blocked.
+This is recommended in CI environments where unexpected system-level changes should be blocked — omit `--bootstrap` and pre-install Nix in your CI image instead.
+
+### Homebrew `tap:` field
+
+When using `package_manager: brew`, `devy.yml` accepts a `tap:` field to pull packages from a custom Homebrew tap:
+
+```yaml
+package_manager: brew
+dependencies:
+  - my-tool:
+      tap: myorg/homebrew-tools
+```
+
+Only allow taps from sources you trust — tapping a malicious repository can execute code during the tap install. This field has no effect when using the Nix backend.
 
 ### `devy.yml` scope
 
