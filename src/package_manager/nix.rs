@@ -575,7 +575,9 @@ mod tests {
         let pm = NixPackageManager::for_project(&crate::test_support::tmp_dir());
         let prepends = pm.path_prepends(std::path::Path::new("/irrelevant"));
         assert_eq!(prepends.len(), 1);
-        assert!(prepends[0].ends_with(".devy/nix-profile/bin"));
+        // Use Path::ends_with (component-aware) rather than str::ends_with so the
+        // check works on Windows where to_string_lossy() produces backslashes.
+        assert!(std::path::Path::new(&prepends[0]).ends_with(".devy/nix-profile/bin"));
     }
 
     #[test]
