@@ -16,6 +16,7 @@ fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "apt" => "mysql-server",
         "winget" => "Oracle.MySQL",
+        "nix" => "mysql80",
         _ => "mysql",
     }
 }
@@ -35,6 +36,15 @@ impl Module for MysqlModule {
     fn is_service(&self) -> bool {
         true
     }
+
+    fn service_exec_name(&self) -> Option<&'static str> {
+        Some("mysqld")
+    }
+
+    fn nix_attr(&self, _dep: &crate::config::Dependency) -> Option<String> {
+        Some("mysql80".to_string())
+    }
+
     fn default_port(&self) -> Option<u16> {
         Some(3306)
     }

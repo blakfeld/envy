@@ -13,6 +13,7 @@ pub struct MailhogModule;
 fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "winget" => "MailHog.MailHog",
+        "nix" => "mailhog",
         _ => "mailhog",
     }
 }
@@ -25,6 +26,15 @@ impl Module for MailhogModule {
     fn is_service(&self) -> bool {
         true
     }
+
+    fn service_exec_name(&self) -> Option<&'static str> {
+        Some("MailHog")
+    }
+
+    fn nix_attr(&self, _dep: &crate::config::Dependency) -> Option<String> {
+        Some("mailhog".to_string())
+    }
+
     fn default_port(&self) -> Option<u16> {
         Some(1025)
     }

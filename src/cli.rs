@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use crate::commands;
+use crate::commands::export::ExportFormat;
 use crate::output;
 
 #[derive(Parser)]
@@ -25,6 +26,9 @@ enum Commands {
         /// Validate without making changes (same as `devy check`)
         #[arg(long)]
         dry_run: bool,
+        /// Install missing package managers automatically (downloads and runs a remote script)
+        #[arg(long)]
+        bootstrap: bool,
     },
     /// Create an empty devy.yml in the current directory
     Init {
@@ -60,6 +64,14 @@ enum Commands {
         /// Shell to generate the snippet for (zsh, bash, fish)
         shell: String,
     },
+    /// Open a GitHub pull request for the current branch in the browser
+    Pr,
+    /// Export the environment as a Nix shell.nix or flake.nix
+    Export {
+        /// Output format
+        #[arg(long, default_value = "flake")]
+        format: ExportFormat,
+    },
     /// List commands from devy.yml — used by shell completion, not intended for direct use
     #[command(hide = true, name = "_commands")]
     ListDefined,
@@ -74,16 +86,21 @@ impl Cli {
             Commands::Up {
                 update,
                 dry_run: true,
+                bootstrap,
             } => {
                 if *update {
                     output::warn("--update has no effect with --dry-run; ignoring");
+                }
+                if *bootstrap {
+                    output::warn("--bootstrap has no effect with --dry-run; ignoring");
                 }
                 commands::check::run()
             }
             Commands::Up {
                 update,
                 dry_run: false,
-            } => commands::up::run(*update),
+                bootstrap,
+            } => commands::up::run(*update, *bootstrap),
             Commands::Init { force } => {
                 commands::init::run(*force, std::path::Path::new("devy.yml"))
             }
@@ -94,6 +111,8 @@ impl Cli {
             Commands::Down => commands::down::run(),
             Commands::Status => commands::status::run(),
             Commands::Check => commands::check::run(),
+            Commands::Pr => commands::pr::run(),
+            Commands::Export { format } => commands::export::run(*format),
             Commands::Hook { shell } => commands::hook::run(shell),
             Commands::ListDefined => {
                 commands::list_commands::run();
@@ -137,8 +156,6 @@ mod tests {
 
     #[test]
     fn cli_run_check_returns_err_without_config() {
-        // Kills `replace Cli::run -> Ok(())` — mutation always returns Ok.
-        // From a temp dir with no devy.yml, `check` must fail.
         let result = with_tempdir(|| {
             let cli = Cli::parse_from(["devy", "check"]);
             cli.run()

@@ -64,6 +64,10 @@ impl Module for RubyModule {
         Some("rbenv")
     }
 
+    fn nix_attr(&self, _dep: &Dependency) -> Option<String> {
+        Some("ruby".to_string())
+    }
+
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
         if pm.name() == "winget" {
             return pm.is_package_installed(&pm_dep(dep, &winget_package_id(dep)));

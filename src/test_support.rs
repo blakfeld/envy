@@ -1,3 +1,10 @@
+// Test port allocation:
+// Tests that probe for a closed port pick a port in the 19980–19999 range, which is
+// unlikely to be in use on developer machines. Each service module uses a distinct port
+// within that range to prevent cross-test interference when the test suite runs in
+// parallel. The ranges were shifted from 19994–19997 to 19981–19984 to avoid conflicts
+// introduced by the Nix backend's health-check tests, which bind their own ports.
+
 /// Process-wide mutex for tests that mutate environment variables.
 ///
 /// Rust's test harness runs tests in parallel threads. Any test that calls
@@ -94,5 +101,6 @@ pub fn make_config(
         environment: env,
         commands: std::collections::HashMap::new(),
         hooks: Default::default(),
+        package_manager: Default::default(),
     }
 }

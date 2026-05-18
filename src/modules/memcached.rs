@@ -12,6 +12,7 @@ pub struct MemcachedModule;
 fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "winget" => "Memcached.Memcached",
+        "nix" => "memcached",
         _ => "memcached",
     }
 }
@@ -24,6 +25,15 @@ impl Module for MemcachedModule {
     fn is_service(&self) -> bool {
         true
     }
+
+    fn service_exec_name(&self) -> Option<&'static str> {
+        Some("memcached")
+    }
+
+    fn nix_attr(&self, _dep: &crate::config::Dependency) -> Option<String> {
+        Some("memcached".to_string())
+    }
+
     fn default_port(&self) -> Option<u16> {
         Some(11211)
     }
@@ -106,9 +116,9 @@ mod tests {
 
     #[test]
     fn memcached_health_check_fails_on_unused_port() {
-        let dep = dep_with_port(19995);
+        let dep = dep_with_port(19982);
         let err = MemcachedModule.health_check(&dep).unwrap_err();
-        assert!(err.to_string().contains("19995"));
+        assert!(err.to_string().contains("19982"));
     }
 
     #[test]

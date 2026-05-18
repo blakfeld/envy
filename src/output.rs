@@ -24,6 +24,10 @@ pub fn info_code(msg: &str, code: &str) {
     println!("  {} {} {}", "·".cyan(), msg, code.bold());
 }
 
+pub fn blank_line() {
+    println!();
+}
+
 pub fn warn(msg: &str) {
     #[cfg(test)]
     if WARN_HOOK.with(|cell| {

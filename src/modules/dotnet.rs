@@ -40,11 +40,16 @@ fn package_name(pm: &dyn PackageManager, dep: &Dependency) -> String {
     match pm.name() {
         "apt" => format!("dotnet-sdk-{major}.0"),
         "winget" => format!("Microsoft.DotNet.SDK.{major}"),
+        "nix" => format!("dotnet-sdk_{major}"),
         _ => "dotnet".to_string(),
     }
 }
 
 impl Module for DotnetModule {
+    fn nix_attr(&self, dep: &Dependency) -> Option<String> {
+        Some(format!("dotnet-sdk_{}", major_version(dep)))
+    }
+
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
         let name = package_name(pm, dep);
         pm.is_package_installed(&pm_dep(dep, &name))

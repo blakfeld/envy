@@ -34,6 +34,10 @@ impl Module for NodeModule {
         Some(&["global_packages"])
     }
 
+    fn nix_attr(&self, _dep: &Dependency) -> Option<String> {
+        Some("nodejs".to_string())
+    }
+
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
         pm.is_package_installed(&pm_dep(dep, node_pkg(pm)))
     }

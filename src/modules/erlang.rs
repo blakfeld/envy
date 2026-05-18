@@ -14,11 +14,16 @@ pub struct ErlangModule;
 fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "winget" => "Erlang-Solutions.Erlang",
+        "nix" => "erlang",
         _ => "erlang",
     }
 }
 
 impl Module for ErlangModule {
+    fn nix_attr(&self, _dep: &Dependency) -> Option<String> {
+        Some("erlang".to_string())
+    }
+
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
         pm.is_package_installed(&pm_dep(dep, package_name(pm)))
     }

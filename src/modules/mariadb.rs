@@ -17,6 +17,7 @@ fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "apt" => "mariadb-server",
         "winget" => "MariaDB.Server",
+        "nix" => "mariadb",
         _ => "mariadb",
     }
 }
@@ -91,6 +92,14 @@ impl Module for MariadbModule {
     /// it as "mysql", but current formulae use the correct name.
     fn service_name<'a>(&self, _dep: &'a Dependency) -> Cow<'a, str> {
         Cow::Borrowed("mariadb")
+    }
+
+    fn service_exec_name(&self) -> Option<&'static str> {
+        Some("mariadbd")
+    }
+
+    fn nix_attr(&self, _dep: &crate::config::Dependency) -> Option<String> {
+        Some("mariadb".to_string())
     }
 
     fn is_running(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {

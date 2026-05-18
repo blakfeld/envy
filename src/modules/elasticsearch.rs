@@ -12,6 +12,7 @@ fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "apt" => "elasticsearch",
         "winget" => "Elastic.Elasticsearch",
+        "nix" => "elasticsearch",
         _ => "elasticsearch-full",
     }
 }
@@ -24,6 +25,15 @@ impl Module for ElasticsearchModule {
     fn is_service(&self) -> bool {
         true
     }
+
+    fn service_exec_name(&self) -> Option<&'static str> {
+        Some("elasticsearch")
+    }
+
+    fn nix_attr(&self, _dep: &crate::config::Dependency) -> Option<String> {
+        Some("elasticsearch".to_string())
+    }
+
     fn default_port(&self) -> Option<u16> {
         Some(9200)
     }
@@ -278,7 +288,7 @@ mod tests {
 
     #[test]
     fn health_check_unknown_status_returns_error() {
-        let dep = dep_with_port(19994);
+        let dep = dep_with_port(19981);
         assert!(ElasticsearchModule.health_check(&dep).is_err());
     }
 

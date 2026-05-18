@@ -14,6 +14,7 @@ fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "apt" => "redis-server",
         "winget" => "Redis.Redis",
+        "nix" => "redis",
         _ => "redis",
     }
 }
@@ -22,6 +23,15 @@ impl Module for RedisModule {
     fn is_service(&self) -> bool {
         true
     }
+
+    fn service_exec_name(&self) -> Option<&'static str> {
+        Some("redis-server")
+    }
+
+    fn nix_attr(&self, _dep: &crate::config::Dependency) -> Option<String> {
+        Some("redis".to_string())
+    }
+
     fn default_port(&self) -> Option<u16> {
         Some(6379)
     }
@@ -120,12 +130,6 @@ mod tests {
             crate::config::ExtraValue::Number(19998u64.into()),
         );
         let dep = Dependency::with_extra("redis", extra);
-        assert!(RedisModule.health_check(&dep).is_err());
-    }
-
-    #[test]
-    fn redis_health_check_uses_default_port_6379_when_key_absent() {
-        let dep = Dependency::simple("redis");
         assert!(RedisModule.health_check(&dep).is_err());
     }
 

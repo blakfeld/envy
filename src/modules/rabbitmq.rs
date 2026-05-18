@@ -13,6 +13,7 @@ fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "apt" => "rabbitmq-server",
         "winget" => "VMware.RabbitMQ",
+        "nix" => "rabbitmq",
         _ => "rabbitmq",
     }
 }
@@ -25,6 +26,15 @@ impl Module for RabbitmqModule {
     fn is_service(&self) -> bool {
         true
     }
+
+    fn service_exec_name(&self) -> Option<&'static str> {
+        Some("rabbitmq-server")
+    }
+
+    fn nix_attr(&self, _dep: &crate::config::Dependency) -> Option<String> {
+        Some("rabbitmq".to_string())
+    }
+
     fn default_port(&self) -> Option<u16> {
         Some(5672)
     }

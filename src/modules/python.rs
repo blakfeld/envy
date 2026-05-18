@@ -17,6 +17,7 @@ fn pkg_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "apt" => "python3",
         "winget" => "Python.Python.3",
+        "nix" => "python3",
         _ => "python",
     }
 }
@@ -87,6 +88,10 @@ fn detect_install_cmd(
 impl Module for PythonModule {
     fn known_extra_keys(&self) -> Option<&'static [&'static str]> {
         Some(&["venv_path", "install_cmd"])
+    }
+
+    fn nix_attr(&self, _dep: &Dependency) -> Option<String> {
+        Some("python3".to_string())
     }
 
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {

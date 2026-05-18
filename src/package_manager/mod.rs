@@ -13,10 +13,15 @@ mod winget;
 #[cfg(target_os = "windows")]
 pub use winget::WinGet;
 
+#[cfg(any(test, target_os = "macos", target_os = "linux"))]
+mod nix;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub use nix::NixPackageManager;
+
 use anyhow::Result;
 use std::path::PathBuf;
 
-use crate::config::Dependency;
+use crate::config::{Dependency, PackageManagerChoice};
 
 pub trait PackageManager {
     fn name(&self) -> &str;
@@ -42,21 +47,85 @@ pub trait PackageManager {
         Ok(())
     }
 
-    fn ensure_available(&self) -> Result<()> {
+    /// Returns paths to prepend to PATH for this package manager's installed binaries.
+    /// Used by `devy up` to wire the environment so project-local binaries are found first.
+    fn path_prepends(&self, _project_root: &std::path::Path) -> Vec<String> {
+        vec![]
+    }
+
+    /// URL for manual installation instructions. Empty string means no URL is shown.
+    fn install_url(&self) -> &str {
+        ""
+    }
+
+    fn ensure_available(&self, allow_bootstrap: bool) -> Result<()> {
         if !self.is_available() {
-            self.bootstrap()
+            if allow_bootstrap {
+                self.bootstrap()
+            } else {
+                let hint = match self.install_url() {
+                    "" => String::new(),
+                    url => format!("\n             Install manually: {url}"),
+                };
+                anyhow::bail!(
+                    "{} is not installed. Re-run with --bootstrap to install automatically.{}",
+                    self.name(),
+                    hint
+                )
+            }
         } else {
             Ok(())
         }
     }
 }
 
-pub fn detect() -> Result<Box<dyn PackageManager>> {
-    #[cfg(target_os = "macos")]
-    return Ok(Box::new(Homebrew));
+/// Detect or select the active package manager.
+///
+/// `pm` comes from `package_manager:` in `devy.yml`. Unknown values are rejected
+/// by serde at parse time; this function only handles the valid enum variants.
+///
+/// `project_root` is used by the Nix backend to scope the profile to the
+/// project directory rather than the shell's current working directory.
+pub fn detect(
+    pm: PackageManagerChoice,
+    project_root: &std::path::Path,
+) -> Result<Box<dyn PackageManager>> {
+    match pm {
+        PackageManagerChoice::Nix => {
+            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+            anyhow::bail!("package_manager: nix is not supported on Windows");
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            return Ok(Box::new(NixPackageManager::for_project(project_root)));
+        }
+        PackageManagerChoice::Brew => {
+            #[cfg(not(target_os = "macos"))]
+            anyhow::bail!("package_manager: brew is only available on macOS");
+            #[cfg(target_os = "macos")]
+            return Ok(Box::new(Homebrew));
+        }
+        PackageManagerChoice::Apt => {
+            #[cfg(not(target_os = "linux"))]
+            anyhow::bail!("package_manager: apt is only available on Linux");
+            #[cfg(target_os = "linux")]
+            return Ok(Box::new(Apt::new()));
+        }
+        PackageManagerChoice::Auto => {
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            crate::output::warn(
+                "No package_manager set in devy.yml — defaulting to nix. \
+                 Add `package_manager: brew` (macOS) or `package_manager: apt` (Linux) \
+                 to keep using your system package manager.",
+            );
+        }
+    }
 
-    #[cfg(target_os = "linux")]
-    return Ok(Box::new(Apt::new()));
+    // Nix is always used on macOS and Linux: it installs packages into a
+    // project-local profile (.devy/nix-profile) and will be bootstrapped by
+    // `devy up` if it is not yet installed. Users who explicitly want their
+    // system package manager should set `package_manager: brew` or
+    // `package_manager: apt` in devy.yml.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    return Ok(Box::new(NixPackageManager::for_project(project_root)));
 
     #[cfg(target_os = "windows")]
     return Ok(Box::new(WinGet::new()));
@@ -89,6 +158,8 @@ pub struct MockPackageManager {
     pub version: Option<String>,
     /// When true, `validate_config` returns an error.
     pub validate_config_fails: bool,
+    /// Paths returned by `path_prepends`. Defaults to empty.
+    pub path_prepends_result: Vec<String>,
 }
 
 #[cfg(test)]
@@ -109,6 +180,7 @@ impl Default for MockPackageManager {
             installed_packages: std::cell::RefCell::new(Vec::new()),
             version: None,
             validate_config_fails: false,
+            path_prepends_result: Vec::new(),
         }
     }
 }
@@ -177,6 +249,9 @@ impl PackageManager for MockPackageManager {
         } else {
             Ok(())
         }
+    }
+    fn path_prepends(&self, _project_root: &std::path::Path) -> Vec<String> {
+        self.path_prepends_result.clone()
     }
 }
 
@@ -258,29 +333,60 @@ mod tests {
     }
 
     #[test]
-    fn detect_returns_ok_on_current_platform() {
+    fn detect_auto_is_ok() {
+        let root = std::path::Path::new("/tmp");
         assert!(
-            detect().is_ok(),
-            "detect() must return Ok on the current platform"
+            detect(PackageManagerChoice::Auto, root).is_ok(),
+            "PackageManagerChoice::Auto must succeed on the current platform"
         );
     }
 
     #[test]
     fn ensure_available_skips_bootstrap_when_already_available() {
         let pm = AvailablePm;
-        assert!(pm.ensure_available().is_ok());
+        assert!(pm.ensure_available(false).is_ok());
     }
 
     #[test]
-    fn ensure_available_calls_bootstrap_when_not_available() {
+    fn ensure_available_calls_bootstrap_when_not_available_and_allowed() {
         let pm = UnavailablePm::new();
-        pm.ensure_available().unwrap();
+        pm.ensure_available(true).unwrap();
         assert!(pm.bootstrap_called.get());
+    }
+
+    #[test]
+    fn ensure_available_returns_err_when_not_available_and_not_allowed() {
+        let pm = UnavailablePm::new();
+        let err = pm.ensure_available(false).unwrap_err();
+        assert!(
+            err.to_string().contains("--bootstrap"),
+            "error must mention --bootstrap"
+        );
     }
 
     #[test]
     fn default_service_config_dir_returns_none() {
         assert!(AvailablePm.service_config_dir("mysql").is_none());
         assert!(AvailablePm.service_config_dir("redis").is_none());
+    }
+
+    #[test]
+    fn default_path_prepends_returns_empty() {
+        // Any PM that doesn't override path_prepends must return an empty vec.
+        assert!(
+            AvailablePm
+                .path_prepends(std::path::Path::new("/tmp"))
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn mock_path_prepends_result_is_returned() {
+        let pm = MockPackageManager {
+            path_prepends_result: vec!["/custom/bin".into()],
+            ..Default::default()
+        };
+        let result = pm.path_prepends(std::path::Path::new("/tmp"));
+        assert_eq!(result, vec!["/custom/bin"]);
     }
 }

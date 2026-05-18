@@ -21,10 +21,20 @@ fn winget_package_id(dep: &Dependency) -> String {
     format!("Microsoft.OpenJDK.{major}")
 }
 
+fn nix_package_id(dep: &Dependency) -> String {
+    let major = dep
+        .version
+        .as_deref()
+        .and_then(|v| v.split('.').next())
+        .unwrap_or("21");
+    format!("jdk{major}")
+}
+
 fn pkg_name(pm: &dyn PackageManager, dep: &Dependency) -> String {
     match pm.name() {
         "apt" => "default-jdk".into(),
         "winget" => winget_package_id(dep),
+        "nix" => nix_package_id(dep),
         _ => "openjdk".into(),
     }
 }
@@ -66,6 +76,10 @@ fn detect_java_home() -> Option<String> {
 }
 
 impl Module for JavaModule {
+    fn nix_attr(&self, dep: &Dependency) -> Option<String> {
+        Some(nix_package_id(dep))
+    }
+
     fn is_installed(&self, pm: &dyn PackageManager, dep: &Dependency) -> Result<bool> {
         pm.is_package_installed(&pm_dep(dep, &pkg_name(pm, dep)))
     }

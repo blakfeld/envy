@@ -11,10 +11,12 @@ use super::{Module, pm_dep};
 pub struct MongodbModule;
 
 // brew requires the mongodb/brew tap; users should add `tap: mongodb/brew` in devy.yml.
+// nix: mongodb is available in nixpkgs but may require nixpkgs.config.allowUnfree = true.
 fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "apt" => "mongodb-org",
         "winget" => "MongoDB.Server",
+        "nix" => "mongodb",
         _ => "mongodb-community",
     }
 }
@@ -27,6 +29,11 @@ impl Module for MongodbModule {
     fn is_service(&self) -> bool {
         true
     }
+
+    fn nix_attr(&self, _dep: &crate::config::Dependency) -> Option<String> {
+        Some("mongodb".to_string())
+    }
+
     fn default_port(&self) -> Option<u16> {
         Some(27017)
     }
@@ -111,7 +118,7 @@ mod tests {
         let mut extra = std::collections::HashMap::new();
         extra.insert(
             "port".into(),
-            crate::config::ExtraValue::Number(19996u64.into()),
+            crate::config::ExtraValue::Number(19983u64.into()),
         );
         let dep = Dependency::with_extra("mongodb", extra);
         assert!(MongodbModule.health_check(&dep).is_err());

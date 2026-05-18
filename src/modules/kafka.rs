@@ -17,6 +17,7 @@ pub struct KafkaModule;
 fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "winget" => "Apache.Kafka",
+        "nix" => "apacheKafka",
         _ => "kafka",
     }
 }
@@ -36,6 +37,11 @@ impl Module for KafkaModule {
     fn is_service(&self) -> bool {
         true
     }
+
+    fn nix_attr(&self, _dep: &crate::config::Dependency) -> Option<String> {
+        Some("apacheKafka".to_string())
+    }
+
     fn default_port(&self) -> Option<u16> {
         Some(9092)
     }

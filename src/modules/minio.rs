@@ -11,6 +11,7 @@ pub struct MinioModule;
 fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "winget" => "MinIO.MinIO",
+        "nix" => "minio",
         _ => "minio",
     }
 }
@@ -23,6 +24,15 @@ impl Module for MinioModule {
     fn is_service(&self) -> bool {
         true
     }
+
+    fn service_exec_name(&self) -> Option<&'static str> {
+        Some("minio")
+    }
+
+    fn nix_attr(&self, _dep: &crate::config::Dependency) -> Option<String> {
+        Some("minio".to_string())
+    }
+
     fn default_port(&self) -> Option<u16> {
         Some(9000)
     }

@@ -35,6 +35,10 @@ impl Module for RustModule {
         Some(&["toolchain", "targets", "components"])
     }
 
+    fn nix_attr(&self, _dep: &Dependency) -> Option<String> {
+        Some("rustup".to_string())
+    }
+
     fn is_installed(&self, _pm: &dyn PackageManager, _dep: &Dependency) -> Result<bool> {
         Ok(which("rustup").is_ok())
     }

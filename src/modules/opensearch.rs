@@ -11,6 +11,7 @@ pub struct OpenSearchModule;
 fn package_name(pm: &dyn PackageManager) -> &'static str {
     match pm.name() {
         "winget" => "OpenSearch.OpenSearch",
+        "nix" => "opensearch",
         _ => "opensearch",
     }
 }
@@ -23,6 +24,15 @@ impl Module for OpenSearchModule {
     fn is_service(&self) -> bool {
         true
     }
+
+    fn service_exec_name(&self) -> Option<&'static str> {
+        Some("opensearch")
+    }
+
+    fn nix_attr(&self, _dep: &crate::config::Dependency) -> Option<String> {
+        Some("opensearch".to_string())
+    }
+
     fn default_port(&self) -> Option<u16> {
         Some(9200)
     }
