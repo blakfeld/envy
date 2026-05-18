@@ -1,6 +1,6 @@
 [package]
 name = "devy"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2024"
 description = "A developer environment manager — install dependencies and configure env vars from a single devy.yml"
 license = "MIT"
