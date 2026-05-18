@@ -176,10 +176,18 @@ mod tests {
 
     #[test]
     fn spawn_cmd_with_cwd_sets_working_directory() {
+        let dir = crate::test_support::tmp_dir();
         let cmd = DevyCommand {
-            cmd: "pwd".into(),
-            cwd: Some("/tmp".into()),
-            shell: "sh".into(),
+            // Use a no-op that exits 0 in the platform default shell.
+            // sh/bash/zsh/fish: `true`; cmd.exe: `cd` (prints CWD, exits 0).
+            cmd: if cfg!(target_os = "windows") {
+                "cd"
+            } else {
+                "true"
+            }
+            .into(),
+            cwd: Some(dir.to_string_lossy().into_owned()),
+            shell: crate::config::default_shell(),
         };
         assert!(spawn_cmd(&cmd, "pwd_test").is_ok());
     }
