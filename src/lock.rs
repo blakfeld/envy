@@ -32,6 +32,11 @@ pub struct LockedDep {
     /// Recorded for future tooling (e.g. `devy remove`, migration guides).
     /// Not read back by any current command.
     pub source: String,
+    /// Port assigned to this service dep. Persisted so the same port is
+    /// reused on every subsequent `devy up`, even when no explicit port
+    /// is set in devy.yml. User-configured ports in devy.yml always win.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub assigned_port: Option<u16>,
 }
 
 impl LockFile {
@@ -95,6 +100,7 @@ mod tests {
             LockedDep {
                 resolved_version: Some("20.11.0".into()),
                 source: "homebrew".into(),
+                assigned_port: None,
             },
         );
         deps.insert(
@@ -102,6 +108,7 @@ mod tests {
             LockedDep {
                 resolved_version: None,
                 source: "homebrew".into(),
+                assigned_port: None,
             },
         );
         let lock = LockFile {
@@ -120,6 +127,7 @@ mod tests {
             LockedDep {
                 resolved_version: None,
                 source: "homebrew".into(),
+                assigned_port: None,
             },
         );
         let lock = LockFile {
@@ -145,6 +153,7 @@ mod tests {
             LockedDep {
                 resolved_version: Some("20.0.0".into()),
                 source: "homebrew".into(),
+                assigned_port: None,
             },
         );
         deps.insert(
@@ -152,6 +161,7 @@ mod tests {
             LockedDep {
                 resolved_version: None,
                 source: "rustup".into(),
+                assigned_port: None,
             },
         );
         let original = LockFile {
@@ -192,6 +202,7 @@ mod tests {
             LockedDep {
                 resolved_version: Some("7.2.3".into()),
                 source: "homebrew".into(),
+                assigned_port: None,
             },
         );
         let lock = LockFile {
@@ -307,6 +318,7 @@ mod tests {
             LockedDep {
                 resolved_version: Some("16.0".into()),
                 source: "homebrew".into(),
+                assigned_port: None,
             },
         );
         let lock = LockFile {

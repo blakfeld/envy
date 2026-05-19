@@ -75,6 +75,23 @@ pub trait Module: Sync {
         None
     }
 
+    /// The `dep.extra` key used to configure this service's port (e.g. `"port"`,
+    /// `"smtp_port"`). `resolve_service_ports` writes a randomly-assigned port
+    /// into `dep.extra` under this key so every downstream consumer (health checks,
+    /// config-file writers, env vars) sees the correct value automatically.
+    ///
+    /// The default returns `Some("port")` for any service that has a `default_port`,
+    /// and `None` for non-services or services whose port cannot be configured.
+    /// Override when the module uses a key other than `"port"` (e.g. mailhog uses
+    /// `"smtp_port"`).
+    fn port_key(&self) -> Option<&'static str> {
+        if self.is_service() && self.default_port().is_some() {
+            Some("port")
+        } else {
+            None
+        }
+    }
+
     /// The install source recorded in devy.lock (e.g. "homebrew", "rustup").
     /// Return `None` to derive the source from the active package manager name.
     fn source(&self) -> Option<&'static str> {
