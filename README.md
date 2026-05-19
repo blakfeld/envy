@@ -109,8 +109,10 @@ dependencies:
         - rust-analyzer
 
 environment:
-  DATABASE_URL: "mysql://root@127.0.0.1:3306/myapp_dev"
-  REDIS_URL: "redis://127.0.0.1:6379"
+  # devy injects MYSQL_HOST, MYSQL_PORT, REDIS_HOST, REDIS_PORT automatically.
+  # Build connection strings from those instead of hardcoding ports.
+  DATABASE_URL: "mysql://root@${MYSQL_HOST}:${MYSQL_PORT}/myapp_dev"
+  REDIS_URL: "redis://${REDIS_HOST}:${REDIS_PORT}"
   LOG_LEVEL: "debug"
 
 commands:
@@ -253,11 +255,11 @@ devy hook fish
 The snippet does two things:
 
 1. **Shadowenv activation** — wraps `devy up` so the new environment is activated in your current shell session immediately after installation.
-2. **Tab completion** — registers completion for all built-in subcommands (`up`, `down`, `status`, `check`, `init`, `hook`) and flags. Commands you define under `commands:` in `devy.yml` are completed **dynamically** — the completion function calls `devy _commands` at tab-press time so new commands appear without reloading your shell.
+2. **Tab completion** — registers completion for all built-in subcommands (`up`, `down`, `start`, `stop`, `restart`, `services`, `status`, `check`, `init`, `hook`, `pr`, `export`) and flags. Commands you define under `commands:` in `devy.yml` are completed **dynamically** — the completion function calls `devy _commands` at tab-press time so new commands appear without reloading your shell.
 
 ## Lock file
 
-`devy up` writes `devy.lock` recording the exact version of every dependency that was installed. On subsequent runs without `--update`, devy pins each versionless dependency to its locked version so the environment is reproducible across machines.
+`devy up` writes `devy.lock` recording the exact version of every dependency that was installed, and the port assigned to every service. On subsequent runs without `--update`, devy pins each versionless dependency to its locked version and reuses its locked port, so the environment is reproducible across machines.
 
 Commit `devy.lock` to version control. Run `devy up --update` when you want to upgrade.
 
@@ -282,6 +284,27 @@ Commit `devy.lock` to version control. Run `devy up --update` when you want to u
 | `meilisearch` | — | Managed service |
 | `mailhog` | — | Managed service |
 | `opensearch` | — | Managed service |
+
+### Service environment variables
+
+For every service dependency, `devy up` automatically injects two environment variables into your shell session:
+
+| Variable | Value |
+|---|---|
+| `<SERVICE>_HOST` | Always `127.0.0.1` |
+| `<SERVICE>_PORT` | The service's effective port |
+
+The prefix is the canonical service name, uppercased, with hyphens replaced by underscores. For example, `redis` → `REDIS_HOST` / `REDIS_PORT`, and `postgresql` → `POSTGRESQL_HOST` / `POSTGRESQL_PORT`.
+
+Port assignment follows this priority order:
+
+1. **Explicit port in `devy.yml`** — e.g. `port: 3307` — always wins.
+2. **Port saved in `devy.lock`** — reused on every subsequent `devy up`, including after `--update`, so the port stays stable across machines and teammates.
+3. **Random available port** — assigned on the first run when no port is configured and no lock entry exists.
+
+devy errors at startup if two services resolve to the same port, whether from explicit config or defaults.
+
+Values set under `environment:` in `devy.yml` take precedence over the auto-injected `_HOST` / `_PORT` variables, so you can override them if needed.
 
 ### Languages and runtimes
 
