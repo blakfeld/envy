@@ -29,6 +29,8 @@ pub struct MockEnvManager {
     pub setup_fails: bool,
     pub setup_called: std::cell::Cell<bool>,
     pub read_vars_returns_some: bool,
+    /// Variables passed to the last `setup` call.
+    pub last_vars: std::cell::RefCell<HashMap<String, String>>,
 }
 
 #[cfg(test)]
@@ -39,6 +41,7 @@ impl Default for MockEnvManager {
             setup_fails: false,
             setup_called: std::cell::Cell::new(false),
             read_vars_returns_some: false,
+            last_vars: std::cell::RefCell::new(HashMap::new()),
         }
     }
 }
@@ -54,10 +57,11 @@ impl EnvManager for MockEnvManager {
     fn setup(
         &self,
         _dir: &Path,
-        _vars: &HashMap<String, String>,
+        vars: &HashMap<String, String>,
         _path_prepends: &[String],
     ) -> Result<()> {
         self.setup_called.set(true);
+        *self.last_vars.borrow_mut() = vars.clone();
         if self.setup_fails {
             anyhow::bail!("mock env setup failure")
         } else {

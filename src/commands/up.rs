@@ -12,7 +12,7 @@ use crate::output;
 use crate::package_manager;
 
 /// Fails if two service dependencies resolve to the same effective port.
-/// Explicit `port:` in devy.yml takes precedence; falls back to the module's default.
+/// Explicit port key in devy.yml takes precedence; falls back to the module's default.
 pub(crate) fn check_port_conflicts(deps: &[Dependency]) -> Result<()> {
     let mut seen: HashMap<u16, &str> = HashMap::new();
     for dep in deps {
@@ -20,7 +20,8 @@ pub(crate) fn check_port_conflicts(deps: &[Dependency]) -> Result<()> {
         if !module.is_service() {
             continue;
         }
-        let effective_port = if let Some(raw) = dep.extra.get("port").and_then(|v| v.as_u64()) {
+        let key = module.port_key().unwrap_or("port");
+        let effective_port = if let Some(raw) = dep.extra.get(key).and_then(|v| v.as_u64()) {
             match u16::try_from(raw) {
                 Ok(0) | Err(_) => anyhow::bail!(
                     "'{}': port value {} is out of range (must be 1–65535)",
@@ -42,6 +43,41 @@ pub(crate) fn check_port_conflicts(deps: &[Dependency]) -> Result<()> {
                 effective_port
             );
         }
+    }
+    Ok(())
+}
+
+/// Injects a stable port into each service dep that doesn't already have one.
+///
+/// Priority: explicit port in `devy.yml` > port saved in the lock file > new random port.
+/// The randomly-assigned port is written into `dep.extra` under `module.port_key()` so
+/// every downstream consumer (health checks, config writers, env vars) uses the same value.
+pub(crate) fn resolve_service_ports(
+    deps: &mut [Dependency],
+    lock: Option<&crate::lock::LockFile>,
+) -> Result<()> {
+    for dep in deps.iter_mut() {
+        let module = modules::get(&dep.name);
+        let Some(key) = module.port_key() else {
+            continue;
+        };
+        if dep.extra.contains_key(key) {
+            continue; // user-configured port wins
+        }
+        let canonical = modules::canonical_name(&dep.name);
+        let port = if let Some(p) = lock
+            .and_then(|l| l.get(canonical))
+            .and_then(|d| d.assigned_port)
+        {
+            p
+        } else {
+            crate::modules::helpers::find_available_port()
+                .with_context(|| format!("Failed to find available port for {}", dep.name))?
+        };
+        dep.extra.insert(
+            key.to_string(),
+            crate::config::ExtraValue::Number(port.into()),
+        );
     }
     Ok(())
 }
@@ -117,7 +153,6 @@ pub(crate) fn up_impl(
     };
 
     let deps = config.normalized_dependencies()?;
-    check_port_conflicts(&deps)?;
 
     for dep in &deps {
         pm.validate_config(dep)
@@ -125,10 +160,15 @@ pub(crate) fn up_impl(
     }
 
     // Pre-compute effective deps once so both phases use the same pinned versions.
-    let effective_deps: Vec<Dependency> = deps
+    let mut effective_deps: Vec<Dependency> = deps
         .iter()
         .map(|dep| apply_lock(dep, lock.as_ref()))
         .collect();
+
+    // Assign stable ports to service deps before conflict detection.
+    // Uses the existing lock (not the version-pinning lock) so ports survive --update.
+    resolve_service_ports(&mut effective_deps, existing_lock.as_ref())?;
+    check_port_conflicts(&effective_deps)?;
 
     // Collect module-suggested env vars and PATH prepends after each dep installs.
     // This ensures failed installs don't pollute the environment config.
@@ -145,6 +185,32 @@ pub(crate) fn up_impl(
             let m = modules::get(&effective.name);
             module_env.extend(m.env_vars(effective, project_root));
             module_path_prepends.extend(m.path_prepends(effective, project_root));
+        }
+    }
+
+    // Emit <SERVICE>_HOST and <SERVICE>_PORT for every service dep.
+    // These run after module env_vars so service-specific vars (REDIS_URL, etc.) are
+    // already present; config.environment can still override everything via merge_env.
+    for effective in &effective_deps {
+        let m = modules::get(&effective.name);
+        if !m.is_service() {
+            continue;
+        }
+        let canonical = modules::canonical_name(&effective.name);
+        let prefix = canonical.replace('-', "_").to_ascii_uppercase();
+        let port_opt: Option<u16> = if let Some(key) = m.port_key() {
+            effective
+                .extra
+                .get(key)
+                .and_then(|v| v.as_u64())
+                .and_then(|raw| u16::try_from(raw).ok())
+                .or_else(|| m.default_port())
+        } else {
+            m.default_port()
+        };
+        module_env.insert(format!("{prefix}_HOST"), "127.0.0.1".into());
+        if let Some(p) = port_opt {
+            module_env.insert(format!("{prefix}_PORT"), p.to_string());
         }
     }
 
@@ -342,11 +408,18 @@ pub(crate) fn write_lock(
     for dep in deps {
         let module = modules::get(&dep.name);
         let resolved = module.resolved_version(pm, dep)?;
+        let assigned_port = module.port_key().and_then(|key| {
+            dep.extra
+                .get(key)
+                .and_then(|v| v.as_u64())
+                .and_then(|raw| u16::try_from(raw).ok())
+        });
         locked.insert(
             modules::canonical_name(&dep.name).to_string(),
             LockedDep {
                 resolved_version: resolved,
                 source: module.source().unwrap_or(pm.name()).to_string(),
+                assigned_port,
             },
         );
     }
@@ -516,6 +589,7 @@ mod tests {
             LockedDep {
                 resolved_version: Some("20.11.0".into()),
                 source: "homebrew".into(),
+                assigned_port: None,
             },
         );
         let lock = LockFile {
@@ -540,6 +614,7 @@ mod tests {
             LockedDep {
                 resolved_version: Some("20.11.0".into()),
                 source: "homebrew".into(),
+                assigned_port: None,
             },
         );
         let lock = LockFile {
@@ -683,6 +758,7 @@ mod tests {
             LockedDep {
                 resolved_version: Some("16.0".into()),
                 source: "homebrew".into(),
+                assigned_port: None,
             },
         );
         let lock = LockFile {
@@ -837,10 +913,14 @@ mod tests {
     }
 
     #[test]
-    fn up_impl_propagates_port_conflict() {
-        // mysql and mariadb both default to port 3306 — should fail before any install.
+    fn up_impl_assigns_distinct_ports_to_services_with_same_default() {
+        // mysql and mariadb both default to port 3306; resolve_service_ports must assign
+        // each a distinct random port so they can coexist without an explicit port in devy.yml.
         let config = make_config(&["mysql", "mariadb"], HashMap::new());
-        let pm = MockPackageManager::default();
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
         let env_mgr = MockEnvManager::default();
         let dir = crate::test_support::tmp_dir();
         let lock = tmp_path();
@@ -855,7 +935,11 @@ mod tests {
             &dir,
             &lock,
         );
-        assert!(result.is_err(), "port conflict must propagate as Err");
+        assert!(
+            result.is_ok(),
+            "mysql and mariadb must coexist when given distinct random ports: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -1001,6 +1085,7 @@ mod tests {
             crate::lock::LockedDep {
                 resolved_version: None,
                 source: "homebrew".into(),
+                assigned_port: None,
             },
         );
         LockFile {
@@ -1057,6 +1142,7 @@ mod tests {
             crate::lock::LockedDep {
                 resolved_version: Some("20.0.0".into()),
                 source: "homebrew".into(),
+                assigned_port: None,
             },
         );
         LockFile {
@@ -1240,6 +1326,241 @@ mod tests {
         assert!(
             lock.exists(),
             "lock file must be written even when service start fails"
+        );
+    }
+
+    // ── resolve_service_ports ─────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_service_ports_injects_random_port_when_no_lock() {
+        let mut deps = vec![Dependency::simple("redis")];
+        resolve_service_ports(&mut deps, None).unwrap();
+        let port_val = deps[0].extra.get("port").and_then(|v| v.as_u64());
+        assert!(
+            port_val.is_some(),
+            "port must be injected when no lock exists"
+        );
+        let port = port_val.unwrap() as u16;
+        assert!(port > 0, "injected port must be non-zero");
+    }
+
+    #[test]
+    fn resolve_service_ports_reuses_locked_port() {
+        let mut deps_map = std::collections::BTreeMap::new();
+        deps_map.insert(
+            "redis".into(),
+            crate::lock::LockedDep {
+                resolved_version: None,
+                source: "homebrew".into(),
+                assigned_port: Some(16379),
+            },
+        );
+        let lock = crate::lock::LockFile {
+            dependencies: deps_map,
+            ..Default::default()
+        };
+        let mut deps = vec![Dependency::simple("redis")];
+        resolve_service_ports(&mut deps, Some(&lock)).unwrap();
+        let port = deps[0].extra.get("port").and_then(|v| v.as_u64()).unwrap();
+        assert_eq!(port, 16379, "locked port must be reused unchanged");
+    }
+
+    #[test]
+    fn resolve_service_ports_respects_user_configured_port() {
+        let mut extra = HashMap::new();
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(6380u64.into()),
+        );
+        let mut deps = vec![Dependency::with_extra("redis", extra)];
+        resolve_service_ports(&mut deps, None).unwrap();
+        let port = deps[0].extra.get("port").and_then(|v| v.as_u64()).unwrap();
+        assert_eq!(port, 6380, "user-configured port must not be overwritten");
+    }
+
+    #[test]
+    fn resolve_service_ports_skips_non_service_deps() {
+        let mut deps = vec![Dependency::simple("node")];
+        resolve_service_ports(&mut deps, None).unwrap();
+        assert!(
+            deps[0].extra.get("port").is_none(),
+            "non-service dep must not have port injected"
+        );
+    }
+
+    #[test]
+    fn resolve_service_ports_assigns_distinct_ports() {
+        let mut deps = vec![Dependency::simple("redis"), Dependency::simple("mysql")];
+        resolve_service_ports(&mut deps, None).unwrap();
+        let p1 = deps[0].extra.get("port").and_then(|v| v.as_u64()).unwrap();
+        let p2 = deps[1].extra.get("port").and_then(|v| v.as_u64()).unwrap();
+        assert_ne!(p1, p2, "two services must receive distinct random ports");
+    }
+
+    // ── HOST / PORT env vars ──────────────────────────────────────────────────
+
+    #[test]
+    fn up_impl_emits_host_and_port_env_vars_for_services() {
+        let config = make_config(&["redis"], HashMap::new());
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        let env_mgr = MockEnvManager {
+            is_available: true,
+            ..Default::default()
+        };
+        let dir = crate::test_support::tmp_dir();
+        let lock = tmp_path();
+        up_impl(
+            &config,
+            &pm,
+            &env_mgr,
+            UpOptions {
+                update: false,
+                bootstrap: false,
+            },
+            &dir,
+            &lock,
+        )
+        .unwrap();
+        let written = env_mgr.last_vars.borrow();
+        assert!(
+            written.contains_key("REDIS_HOST"),
+            "REDIS_HOST must be in the written env vars"
+        );
+        assert!(
+            written.contains_key("REDIS_PORT"),
+            "REDIS_PORT must be in the written env vars"
+        );
+        assert_eq!(
+            written.get("REDIS_HOST").map(String::as_str),
+            Some("127.0.0.1")
+        );
+    }
+
+    #[test]
+    fn up_impl_emits_mysql_host_and_port_for_mysql() {
+        let config = make_config(&["mysql"], HashMap::new());
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        let env_mgr = MockEnvManager {
+            is_available: true,
+            ..Default::default()
+        };
+        let dir = crate::test_support::tmp_dir();
+        let lock = tmp_path();
+        up_impl(
+            &config,
+            &pm,
+            &env_mgr,
+            UpOptions {
+                update: false,
+                bootstrap: false,
+            },
+            &dir,
+            &lock,
+        )
+        .unwrap();
+        let written = env_mgr.last_vars.borrow();
+        assert_eq!(
+            written.get("MYSQL_HOST").map(String::as_str),
+            Some("127.0.0.1"),
+            "MYSQL_HOST must be 127.0.0.1"
+        );
+        let port: u16 = written
+            .get("MYSQL_PORT")
+            .expect("MYSQL_PORT must be present")
+            .parse()
+            .expect("MYSQL_PORT must be a valid port number");
+        assert!(port > 0, "MYSQL_PORT must be non-zero");
+    }
+
+    #[test]
+    fn up_impl_does_not_emit_host_port_for_non_services() {
+        let config = make_config(&["node"], HashMap::new());
+        let pm = MockPackageManager {
+            installed: true,
+            ..Default::default()
+        };
+        let env_mgr = MockEnvManager {
+            is_available: true,
+            ..Default::default()
+        };
+        let dir = crate::test_support::tmp_dir();
+        let lock = tmp_path();
+        up_impl(
+            &config,
+            &pm,
+            &env_mgr,
+            UpOptions {
+                update: false,
+                bootstrap: false,
+            },
+            &dir,
+            &lock,
+        )
+        .unwrap();
+        let written = env_mgr.last_vars.borrow();
+        assert!(
+            !written.contains_key("NODE_HOST"),
+            "NODE_HOST must not be emitted for non-service deps"
+        );
+    }
+
+    // ── write_lock stores assigned_port ───────────────────────────────────────
+
+    #[test]
+    fn write_lock_stores_assigned_port_for_service_with_explicit_port() {
+        let path = tmp_path();
+        let pm = MockPackageManager::default();
+        let mut extra = HashMap::new();
+        extra.insert(
+            "port".into(),
+            crate::config::ExtraValue::Number(16379u64.into()),
+        );
+        let deps = vec![Dependency::with_extra("redis", extra)];
+        write_lock(&deps, &pm, &path).unwrap();
+        let lock = crate::lock::LockFile::load(&path).unwrap().unwrap();
+        let locked_dep = lock.get("redis").unwrap();
+        assert_eq!(
+            locked_dep.assigned_port,
+            Some(16379),
+            "explicit port must be persisted as assigned_port"
+        );
+    }
+
+    #[test]
+    fn write_lock_omits_assigned_port_for_non_service() {
+        let path = tmp_path();
+        let pm = MockPackageManager::default();
+        let deps = vec![Dependency::simple("node")];
+        write_lock(&deps, &pm, &path).unwrap();
+        let lock = crate::lock::LockFile::load(&path).unwrap().unwrap();
+        let locked_dep = lock.get("node").unwrap();
+        assert!(
+            locked_dep.assigned_port.is_none(),
+            "non-service dep must not have assigned_port in the lock"
+        );
+    }
+
+    #[test]
+    fn write_lock_persists_randomly_injected_port() {
+        // Simulates what up_impl does: resolve_service_ports injects a port into extra,
+        // then write_lock must persist it so the next run reuses the same port.
+        let path = tmp_path();
+        let pm = MockPackageManager::default();
+        let mut deps = vec![Dependency::simple("redis")];
+        resolve_service_ports(&mut deps, None).unwrap();
+        let injected = deps[0].extra.get("port").and_then(|v| v.as_u64()).unwrap() as u16;
+        write_lock(&deps, &pm, &path).unwrap();
+        let lock = crate::lock::LockFile::load(&path).unwrap().unwrap();
+        assert_eq!(
+            lock.get("redis").unwrap().assigned_port,
+            Some(injected),
+            "randomly-injected port must be persisted in the lock"
         );
     }
 }

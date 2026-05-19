@@ -38,6 +38,9 @@ impl Module for MailhogModule {
     fn default_port(&self) -> Option<u16> {
         Some(1025)
     }
+    fn port_key(&self) -> Option<&'static str> {
+        Some("smtp_port")
+    }
     fn known_extra_keys(&self) -> Option<&'static [&'static str]> {
         Some(&["smtp_port"])
     }
@@ -262,6 +265,25 @@ mod tests {
             MailhogModule
                 .stop(&pm, &Dependency::simple("mailhog"))
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn port_key_is_smtp_port() {
+        assert_eq!(MailhogModule.port_key(), Some("smtp_port"));
+    }
+
+    #[test]
+    fn resolve_service_ports_injects_into_smtp_port_key() {
+        let mut deps = vec![Dependency::simple("mailhog")];
+        crate::commands::up::resolve_service_ports(&mut deps, None).unwrap();
+        assert!(
+            deps[0].extra.contains_key("smtp_port"),
+            "resolve_service_ports must inject into smtp_port, not port"
+        );
+        assert!(
+            !deps[0].extra.contains_key("port"),
+            "port key must not be set for mailhog"
         );
     }
 }

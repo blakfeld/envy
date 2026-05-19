@@ -113,8 +113,15 @@ pub(super) fn run_cmd(prog: &str, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+/// Binds an ephemeral socket to let the OS pick a free port and returns that port number.
+pub(crate) fn find_available_port() -> anyhow::Result<u16> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .context("Failed to bind socket to discover an available port")?;
+    Ok(listener.local_addr()?.port())
+}
+
 /// Reads a port value from `dep.extra[key]`, returning an error on overflow or zero.
-pub(super) fn extra_port(dep: &Dependency, key: &str, default: u16) -> Result<u16> {
+pub(crate) fn extra_port(dep: &Dependency, key: &str, default: u16) -> Result<u16> {
     let raw = dep
         .extra
         .get(key)
