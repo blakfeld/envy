@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use which::which;
 
@@ -57,8 +57,8 @@ impl Shadowenv {
         Ok(())
     }
 
-    fn trust(&self, dir: &Path) -> Result<()> {
-        let status = Command::new("shadowenv")
+    fn trust(&self, dir: &Path, bin: &Path) -> Result<()> {
+        let status = Command::new(bin)
             .args(["trust"])
             .current_dir(dir)
             .status()
@@ -174,7 +174,19 @@ impl EnvManager for Shadowenv {
         path_prepends: &[String],
     ) -> Result<()> {
         self.write_env_file(dir, vars, path_prepends)?;
-        self.trust(dir)?;
+        // After a fresh Nix install the profile bin dir isn't on PATH yet, so
+        // `which` may fail. Fall back to searching the dirs we're about to
+        // prepend — one of them will contain the just-installed shadowenv binary.
+        let bin = which("shadowenv")
+            .ok()
+            .or_else(|| {
+                path_prepends
+                    .iter()
+                    .map(|p| PathBuf::from(p).join("shadowenv"))
+                    .find(|p| p.exists())
+            })
+            .unwrap_or_else(|| PathBuf::from("shadowenv"));
+        self.trust(dir, &bin)?;
         Ok(())
     }
 

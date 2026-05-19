@@ -1,0 +1,170 @@
+name: Integration
+
+# Runs real package manager installs to verify end-to-end behavior.
+# Triggered on pushes to main and manually — not on every PR (installs are slow).
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ── Nix (Linux) ─────────────────────────────────────────────────────────────
+  nix-linux:
+    name: Smoke test · Nix (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: nix-linux
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Build devy
+        run: cargo build --release
+
+      - name: Smoke test — install jq via Nix, check, verify
+        run: |
+          set -euo pipefail
+          TMPDIR=$(mktemp -d)
+          trap 'rm -rf "$TMPDIR"' EXIT
+          cd "$TMPDIR"
+          git init -q
+
+          cat > devy.yml <<'EOF'
+          name: smoke-nix
+          package_manager: nix
+          dependencies:
+            - jq
+          EOF
+
+          "$OLDPWD/target/release/devy" up
+          "$OLDPWD/target/release/devy" check
+
+          # Verify the package landed in the project-local Nix profile.
+          test -x .devy/nix-profile/bin/jq
+          .devy/nix-profile/bin/jq --version
+
+  # ── Nix (macOS) ─────────────────────────────────────────────────────────────
+  nix-macos:
+    name: Smoke test · Nix (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: nix-macos
+
+      # cachix/install-nix-action fails on macOS when _nixbld users already
+      # exist (eDSRecordAlreadyExists). The Determinate Systems action uses an
+      # installer that handles pre-existing users and partial installations
+      # gracefully, making it the reliable choice for macOS CI runners.
+      - uses: DeterminateSystems/nix-installer-action@v4
+
+      - name: Build devy
+        run: cargo build --release
+
+      - name: Smoke test — install jq via Nix, check, verify
+        run: |
+          set -euo pipefail
+          TMPDIR=$(mktemp -d)
+          trap 'rm -rf "$TMPDIR"' EXIT
+          cd "$TMPDIR"
+          git init -q
+
+          cat > devy.yml <<'EOF'
+          name: smoke-nix-macos
+          package_manager: nix
+          dependencies:
+            - jq
+          EOF
+
+          "$OLDPWD/target/release/devy" up
+          "$OLDPWD/target/release/devy" check
+
+          test -x .devy/nix-profile/bin/jq
+          .devy/nix-profile/bin/jq --version
+
+  # ── Homebrew (macOS) ─────────────────────────────────────────────────────────
+  brew-macos:
+    name: Smoke test · Homebrew (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: brew-macos
+
+      - name: Build devy
+        run: cargo build --release
+
+      - name: Smoke test — install jq via Homebrew, check, verify
+        run: |
+          set -euo pipefail
+          TMPDIR=$(mktemp -d)
+          trap 'rm -rf "$TMPDIR"' EXIT
+          cd "$TMPDIR"
+          git init -q
+
+          cat > devy.yml <<'EOF'
+          name: smoke-brew
+          package_manager: brew
+          dependencies:
+            - jq
+          EOF
+
+          "$OLDPWD/target/release/devy" up
+          "$OLDPWD/target/release/devy" check
+
+          brew list jq
+          jq --version
+
+  # ── Apt (Linux) ─────────────────────────────────────────────────────────────
+  apt-linux:
+    name: Smoke test · Apt (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: apt-linux
+
+      - name: Build devy
+        run: cargo build --release
+
+      - name: Smoke test — install jq via Apt, check, verify
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          TMPDIR=$(mktemp -d)
+          trap 'rm -rf "$TMPDIR"' EXIT
+          cd "$TMPDIR"
+          git init -q
+
+          cat > devy.yml <<'EOF'
+          name: smoke-apt
+          package_manager: apt
+          dependencies:
+            - jq
+          EOF
+
+          "$OLDPWD/target/release/devy" up
+          "$OLDPWD/target/release/devy" check
+
+          which jq
+          jq --version
