@@ -70,7 +70,6 @@ jobs:
       # installer that handles pre-existing users and partial installations
       # gracefully, making it the reliable choice for macOS CI runners.
       - uses: DeterminateSystems/nix-installer-action@v4
-
       - name: Build devy
         run: cargo build --release
 
