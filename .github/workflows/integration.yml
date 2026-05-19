@@ -65,10 +65,11 @@ jobs:
         with:
           key: nix-macos
 
-      - uses: cachix/install-nix-action@v27
-        with:
-          nix_path: nixpkgs=channel:nixos-unstable
-
+      # cachix/install-nix-action fails on macOS when _nixbld users already
+      # exist (eDSRecordAlreadyExists). The Determinate Systems action uses an
+      # installer that handles pre-existing users and partial installations
+      # gracefully, making it the reliable choice for macOS CI runners.
+      - uses: DeterminateSystems/nix-installer-action@v4
       - name: Build devy
         run: cargo build --release
 
